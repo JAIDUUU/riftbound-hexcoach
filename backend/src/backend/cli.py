@@ -19,7 +19,7 @@ from backend.cards.snapshot import (
     write_json,
     write_snapshot,
 )
-from backend.config import CARDS_DATA_DIR, RULES_DATA_DIR
+from backend.config import CARDS_DATA_DIR, GOLDEN_SET_PATH, RULES_DATA_DIR
 
 CORE_RULES_PDF_GLOB = "RiftboundCoreRules-*.pdf"
 
@@ -138,6 +138,46 @@ def _search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _check_golden(_: argparse.Namespace) -> int:
+    from backend.evals.golden import load_golden_set
+
+    items = load_golden_set(GOLDEN_SET_PATH)
+    answers = sum(1 for item in items if item.behaviour == "answer")
+    print(
+        f"{len(items)} golden items ({answers} answer, {len(items) - answers} abstain). All valid."
+    )
+    return 0
+
+
+def _eval_retrieval(args: argparse.Namespace) -> int:
+    from backend.db import make_engine
+    from backend.evals.golden import load_golden_set
+    from backend.evals.langfuse_run import langfuse_client, run_experiment, upload_golden_set
+    from backend.evals.retrieval_eval import aggregate_hit_rate
+    from backend.retrieval.repository import search_chunks
+
+    items = load_golden_set(GOLDEN_SET_PATH)
+    client = langfuse_client()
+    upload_golden_set(client, items)
+    print(f"Uploaded {len(items)} items to the Langfuse dataset.")
+
+    engine = make_engine()
+    with engine.connect() as connection:
+
+        def retrieve(question: str) -> list[str]:
+            hits = search_chunks(connection, question, limit=args.limit)
+            return [hit.rule_id for hit in hits if hit.rule_id is not None]
+
+        results = run_experiment(client, items, retrieve, args.run_name)
+    engine.dispose()
+
+    for result in results:
+        missing = f" missing: {', '.join(result.missing)}" if result.missing else ""
+        print(f"{result.item_id}: hit rate {result.hit_rate:.2f}{missing}")
+    print(f"Aggregate rule hit rate over {len(results)} items: {aggregate_hit_rate(results):.2f}")
+    return 0
+
+
 def _ask(args: argparse.Namespace) -> int:
     from backend.llm.providers import chat_chain
 
@@ -192,6 +232,12 @@ def build_parser() -> argparse.ArgumentParser:
     searcher.add_argument("-k", "--limit", type=int, default=10, help="Max hits (default 10)")
     asker = add("ask", _ask, "Send one prompt through the real provider chain (smoke test).")
     asker.add_argument("prompt", nargs="+", help="The prompt to send")
+    add("check-golden", _check_golden, "Validate the golden set file.")
+    evaluator = add(
+        "eval-retrieval", _eval_retrieval, "Run the golden set against retrieval via Langfuse."
+    )
+    evaluator.add_argument("--run-name", required=True, help="Experiment run name in Langfuse")
+    evaluator.add_argument("-k", "--limit", type=int, default=10, help="Chunks per query")
     return parser
 
 

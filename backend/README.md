@@ -33,6 +33,8 @@ uv run backend card <name>     # look a card up by oracle name or alias and prin
 uv run backend ingest-rules    # chunk the newest Core Rules PDF in data/rules into the database
 uv run backend search <query>  # full-text search across the ingested chunks (-k for more hits)
 uv run backend ask <prompt>    # smoke-test the LLM provider fallback chain with one prompt
+uv run backend check-golden    # validate data/golden/golden-set.yaml
+uv run backend eval-retrieval --run-name <name>  # score retrieval on the golden set via Langfuse
 ```
 
 `refresh-cards` rewrites `data/cards/rifthunt-snapshot.json` (one card per line, so diffs stay
@@ -48,6 +50,14 @@ parent rule as metadata), checks that the numbering came out sequential, and rep
 previous rules version in the `chunks` table (ADR 0008: single current version). The rules
 version is the document's own "Last Updated" date. The Tournament Rules PDF in `data/rules/`
 is a separate document (organized-play procedures) and is not ingested.
+
+`eval-retrieval` uploads the golden set (`data/golden/golden-set.yaml`, hand-written rulings
+with the Core Rules ids a correct answer must cite) to the Langfuse dataset `hexcoach-golden`
+— item ids are stable, so re-uploads upsert — then runs every `answer` item through `search`
+and records a `rule_hit_rate` score per item (the share of expected rule ids among the top
+`-k` hits, default 10). It needs `DATABASE_URL`, ingested rules and the `LANGFUSE_*` keys.
+`abstain` items (where the coach should ask for clarification instead of answering) are
+uploaded for later answer-level evals but skipped at the retrieval level.
 
 ## Tests
 
