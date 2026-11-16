@@ -8,12 +8,12 @@ from backend.evals.retrieval_eval import (
 )
 
 
-def _item(item_id: str, behaviour: str, rulings: tuple[str, ...]) -> GoldenItem:
+def _item(item_id: str, behaviour: str, expected_rules: tuple[str, ...]) -> GoldenItem:
     return GoldenItem(
         id=item_id,
         question=f"question {item_id}",
         behaviour=behaviour,  # type: ignore[arg-type]
-        rulings=rulings,
+        expected_rules=expected_rules,
         sources=(),
         lang="en",
         notes=None,

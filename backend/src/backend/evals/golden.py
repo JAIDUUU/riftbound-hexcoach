@@ -24,14 +24,14 @@ class GoldenItem:
     id: str
     question: str
     behaviour: Behaviour
-    rulings: tuple[str, ...]
+    expected_rules: tuple[str, ...]
     sources: tuple[str, ...]
     lang: str
     notes: str | None
 
 
-def _rulings(entry: dict[str, Any]) -> tuple[str, ...]:
-    raw: object = entry.get("rulings") or []
+def _expected_rules(entry: dict[str, Any]) -> tuple[str, ...]:
+    raw: object = entry.get("expected_rules") or []
     if not isinstance(raw, list):
         return ()
     return tuple(str(rule_id) for rule_id in cast(list[Any], raw))
@@ -47,18 +47,18 @@ def _item_problems(entry: dict[str, Any], index: int) -> list[str]:
     behaviour = entry.get("behaviour")
     if behaviour not in _BEHAVIOURS:
         problems.append(f"{label}: behaviour must be answer or abstain, got {behaviour!r}")
-    if not isinstance(entry.get("rulings") or [], list):
-        problems.append(f"{label}: rulings must be a list")
-    rulings = _rulings(entry)
-    for rule_id in rulings:
+    if not isinstance(entry.get("expected_rules") or [], list):
+        problems.append(f"{label}: expected_rules must be a list")
+    expected_rules = _expected_rules(entry)
+    for rule_id in expected_rules:
         if not _RULE_ID.match(rule_id):
             problems.append(f"{label}: {rule_id!r} is not a rule id (like 471.1, no trailing dot)")
-    if behaviour == "answer" and not rulings:
-        problems.append(f"{label}: an answer item needs at least one ruling")
-    if behaviour == "abstain" and rulings:
-        problems.append(f"{label}: an abstain item must not list rulings")
-    if len(set(rulings)) != len(rulings):
-        problems.append(f"{label}: duplicate rulings")
+    if behaviour == "answer" and not expected_rules:
+        problems.append(f"{label}: an answer item needs at least one expected rule")
+    if behaviour == "abstain" and expected_rules:
+        problems.append(f"{label}: an abstain item must not list expected rules")
+    if len(set(expected_rules)) != len(expected_rules):
+        problems.append(f"{label}: duplicate expected rules")
     return problems
 
 
@@ -81,7 +81,7 @@ def parse_golden(data: Any) -> list[GoldenItem]:
                 id=item_id,
                 question=str(entry.get("question") or "").strip(),
                 behaviour=cast(Behaviour, entry.get("behaviour", "answer")),
-                rulings=_rulings(entry),
+                expected_rules=_expected_rules(entry),
                 sources=tuple(
                     str(source) for source in cast(list[Any], entry.get("sources") or [])
                 ),

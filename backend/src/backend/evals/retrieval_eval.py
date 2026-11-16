@@ -31,7 +31,7 @@ def rule_hit_rate(expected: Sequence[str], retrieved: Sequence[str]) -> float:
 
 
 def evaluate_item(item: GoldenItem, retrieved: Sequence[str]) -> ItemResult:
-    expected = tuple(dict.fromkeys(item.rulings))
+    expected = tuple(dict.fromkeys(item.expected_rules))
     found = tuple(rule_id for rule_id in expected if rule_id in set(retrieved))
     missing = tuple(rule_id for rule_id in expected if rule_id not in set(retrieved))
     return ItemResult(item.id, expected, found, missing, rule_hit_rate(expected, retrieved))

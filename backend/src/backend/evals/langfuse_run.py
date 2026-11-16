@@ -39,7 +39,7 @@ def upload_golden_set(client: Langfuse, items: Sequence[GoldenItem]) -> None:
             input={"question": item.question, "lang": item.lang},
             expected_output={
                 "behaviour": item.behaviour,
-                "rulings": list(item.rulings),
+                "expected_rules": list(item.expected_rules),
                 "sources": list(item.sources),
             },
             metadata={"notes": item.notes} if item.notes else None,

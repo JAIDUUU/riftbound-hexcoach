@@ -11,7 +11,7 @@ def _entry(**overrides: Any) -> dict[str, Any]:
         "id": "q01",
         "question": "Can I?",
         "behaviour": "answer",
-        "rulings": ["471.1"],
+        "expected_rules": ["471.1"],
     }
     entry.update(overrides)
     return entry
@@ -29,32 +29,32 @@ def test_a_valid_item_parses_with_defaults() -> None:
     (item,) = parse_golden({"items": [_entry(notes="  watch the timing  ")]})
 
     assert item.id == "q01"
-    assert item.rulings == ("471.1",)
+    assert item.expected_rules == ("471.1",)
     assert item.sources == ()
     assert item.lang == "en"
     assert item.notes == "watch the timing"
 
 
-def test_an_answer_item_without_rulings_is_rejected() -> None:
-    with pytest.raises(ValueError, match="at least one ruling"):
-        parse_golden({"items": [_entry(rulings=[])]})
+def test_an_answer_item_without_expected_rules_is_rejected() -> None:
+    with pytest.raises(ValueError, match="at least one expected rule"):
+        parse_golden({"items": [_entry(expected_rules=[])]})
 
 
-def test_an_abstain_item_with_rulings_is_rejected() -> None:
-    with pytest.raises(ValueError, match="must not list rulings"):
+def test_an_abstain_item_with_expected_rules_is_rejected() -> None:
+    with pytest.raises(ValueError, match="must not list expected rules"):
         parse_golden({"items": [_entry(behaviour="abstain")]})
 
 
 def test_rule_ids_with_trailing_dots_are_rejected() -> None:
     with pytest.raises(ValueError, match=r"'471\.1\.' is not a rule id"):
-        parse_golden({"items": [_entry(rulings=["471.1."])]})
+        parse_golden({"items": [_entry(expected_rules=["471.1."])]})
 
 
-def test_duplicate_ids_and_rulings_are_rejected() -> None:
+def test_duplicate_ids_and_expected_rules_are_rejected() -> None:
     with pytest.raises(ValueError, match="duplicate id"):
         parse_golden({"items": [_entry(), _entry()]})
-    with pytest.raises(ValueError, match="duplicate rulings"):
-        parse_golden({"items": [_entry(rulings=["471.1", "471.1"])]})
+    with pytest.raises(ValueError, match="duplicate expected rules"):
+        parse_golden({"items": [_entry(expected_rules=["471.1", "471.1"])]})
 
 
 def test_unknown_behaviour_and_missing_question_are_rejected_together() -> None:
