@@ -1,0 +1,1136 @@
+{
+ "cards": [
+  {
+   "id": "ogn-001-298",
+   "printing_id": "01afb7e3-0e97-42a2-9458-28a51a2626b4",
+   "oracle_id": "f2c16cd8-01a4-4357-b741-34db22446e15",
+   "oracleId": "f2c16cd8-01a4-4357-b741-34db22446e15",
+   "riftboundId": "ogn-001-298",
+   "name": "Blazing Scorcher",
+   "cleanName": "Blazing Scorcher",
+   "num": 1,
+   "energy": 5,
+   "might": 5,
+   "power": null,
+   "type": "Unit",
+   "supertype": null,
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": "[Accelerate] (You may pay :rb_energy_1::rb_rune_fury: as an additional cost to have me enter ready.)",
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Dragon",
+    "Noxus"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/15ed971e4029a92b362a81ccadf309fb81e40b81-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-001-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "ogn-007-298",
+   "printing_id": "ace50069-1314-4a45-9363-bcd5d23fcbbe",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "ogn-007-298",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 7,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/12bcd0cde5d9ff4640e82945001e9fef863530f1-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-007-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "ogn-007a-298",
+   "printing_id": "e49aa0ec-e81b-4037-91e1-923ae4c29ffa",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "ogn-007a-298",
+   "name": "Fury Rune (Alternate Art)",
+   "cleanName": "Fury Rune",
+   "num": 7,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Showcase",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/09da06c69d07d4e72dde703737ef167472c715af-1488x2078.png?accountingTag=RB",
+   "img": "cards/ogn-007a-298.png",
+   "orientation": "portrait",
+   "alt": true,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "ogn-013-298",
+   "printing_id": "51f6861a-7a75-4971-8d78-7a6781d7c0f5",
+   "oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185",
+   "oracleId": "df4c1239-7d32-465d-8811-c95ed6827185",
+   "riftboundId": "ogn-013-298",
+   "name": "Pouty Poro",
+   "cleanName": "Pouty Poro",
+   "num": 13,
+   "energy": 2,
+   "might": 2,
+   "power": null,
+   "type": "Unit",
+   "supertype": null,
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": "[Deflect] (Opponents must pay :rb_rune_rainbow: to choose me with a spell or ability.)",
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Poro"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/d541bf3bcb5aa3ad0d48d87f5753569b72ac426f-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-013-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "ogn-049-298",
+   "printing_id": "ceafaa92-d020-4e00-b17b-a3a2fb343d93",
+   "oracle_id": "94e2d6fd-7c5d-4a75-acaa-fa1cc3050fd8",
+   "oracleId": "94e2d6fd-7c5d-4a75-acaa-fa1cc3050fd8",
+   "riftboundId": "ogn-049-298",
+   "name": "Playful Phantom",
+   "cleanName": "Playful Phantom",
+   "num": 49,
+   "energy": 5,
+   "might": 5,
+   "power": null,
+   "type": "Unit",
+   "supertype": null,
+   "rarity": "Common",
+   "domains": [
+    "Calm"
+   ],
+   "text": null,
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Spirit",
+    "Shadow Isles"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/3171ef8c7968b0dfe088725b9721b19d175bdb1e-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-049-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "ogn-073-298",
+   "printing_id": "076b565f-d850-4a5f-8634-850ba1609e02",
+   "oracle_id": "f30de1e6-73f9-4b64-9211-791d0fc422e7",
+   "oracleId": "f30de1e6-73f9-4b64-9211-791d0fc422e7",
+   "riftboundId": "ogn-073-298",
+   "name": "Sona, Harmonious",
+   "cleanName": "Sona, Harmonious",
+   "num": 73,
+   "energy": 4,
+   "might": 4,
+   "power": 1,
+   "type": "Unit",
+   "supertype": "Champion",
+   "rarity": "Rare",
+   "domains": [
+    "Calm"
+   ],
+   "text": "While I'm at a battlefield, ready 4 friendly runes at the end of your turn.",
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Sona",
+    "Demacia"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/8582f6430821fb912fcb3619c5ce9405f254cb2f-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-073-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "ogn-271-298",
+   "printing_id": "f32c3f01-ffaf-45ac-a4aa-8002ca55ffca",
+   "oracle_id": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "oracleId": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "riftboundId": "ogn-271-298",
+   "name": "Recruit (DE)",
+   "cleanName": "Recruit (DE)",
+   "num": 271,
+   "energy": null,
+   "might": 1,
+   "power": null,
+   "type": "Unit",
+   "supertype": "Token",
+   "rarity": "Common",
+   "domains": [
+    "Colorless"
+   ],
+   "text": null,
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Recruit"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/7c3362dc6e6e6fb724ef31b061a44d2976f5b01f-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-271-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": null
+  },
+  {
+   "id": "ogn-272-298",
+   "printing_id": "7ab2151a-860b-4dec-a110-b6a83e91e4e9",
+   "oracle_id": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "oracleId": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "riftboundId": "ogn-272-298",
+   "name": "Recruit (NX)",
+   "cleanName": "Recruit (NX)",
+   "num": 272,
+   "energy": null,
+   "might": 1,
+   "power": null,
+   "type": "Unit",
+   "supertype": "Token",
+   "rarity": "Common",
+   "domains": [
+    "Colorless"
+   ],
+   "text": null,
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Recruit"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/c168ca334739090a060710dfc440982c3462ac8c-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-272-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": null
+  },
+  {
+   "id": "ogn-273-298",
+   "printing_id": "aa7c53c0-80f8-4943-8e49-6f7c79fad38b",
+   "oracle_id": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "oracleId": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "riftboundId": "ogn-273-298",
+   "name": "Recruit (ZN)",
+   "cleanName": "Recruit (ZN)",
+   "num": 273,
+   "energy": null,
+   "might": 1,
+   "power": null,
+   "type": "Unit",
+   "supertype": "Token",
+   "rarity": "Common",
+   "domains": [
+    "Colorless"
+   ],
+   "text": null,
+   "set": "OGN",
+   "setName": "Origins",
+   "tags": [
+    "Recruit"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/d93ec9a524a2989b9d7ef23c6fc02e8ce39959c2-744x1039.png?accountingTag=RB",
+   "img": "cards/ogn-273-298.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": null
+  },
+  {
+   "id": "ogs-017-024",
+   "printing_id": "079ebc00-510e-4d55-88e1-500cd9e68e0b",
+   "oracle_id": "ca7c49d5-0303-485f-a0a9-a3c748d57b92",
+   "oracleId": "ca7c49d5-0303-485f-a0a9-a3c748d57b92",
+   "riftboundId": "ogs-017-024",
+   "name": "Annie, Dark Child (Starter)",
+   "cleanName": "Annie, Dark Child",
+   "num": 17,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Legend",
+   "supertype": null,
+   "rarity": "Rare",
+   "domains": [
+    "Fury",
+    "Chaos"
+   ],
+   "text": "At the end of your turn, ready 2 runes.",
+   "set": "OGS",
+   "setName": "Proving Grounds",
+   "tags": [
+    "Annie"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/89963e1d1cffd69c620fb5d6b037f50d5c334463-744x1039.png?accountingTag=RB",
+   "img": "cards/ogs-017-024.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal"
+   ]
+  },
+  {
+   "id": "rad-r01",
+   "printing_id": "e4408c55-9d30-41ed-8b3b-945f1893f489",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "rad-r01",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "RAD",
+   "setName": "Radiance",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/e0337944fa56c357ab3b9a822064a8f58ead8315-744x1039.png?accountingTag=RB",
+   "img": "cards/rad-r01.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "rad-r01a",
+   "printing_id": "0f69b05d-21ff-4bf9-b38f-3942aa060635",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "rad-r01a",
+   "name": "Fury Rune (Alternate Art)",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Showcase",
+   "domains": [
+    "Fury"
+   ],
+   "text": "[NO TEXT]",
+   "set": "RAD",
+   "setName": "Radiance",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/55f5b003c67cd821895bc78a0a0c36322af53e11-744x1039.png?accountingTag=RB",
+   "img": "cards/rad-r01a.png",
+   "orientation": "portrait",
+   "alt": true,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "unl-220-219",
+   "printing_id": "17ee06fb-589f-47ee-ae6f-0d24cf1459bc",
+   "oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185",
+   "oracleId": "df4c1239-7d32-465d-8811-c95ed6827185",
+   "riftboundId": "unl-220-219",
+   "name": "Pouty Poro (Overnumbered)",
+   "cleanName": "Pouty Poro",
+   "num": 220,
+   "energy": 2,
+   "might": 2,
+   "power": null,
+   "type": "Unit",
+   "supertype": null,
+   "rarity": "Showcase",
+   "domains": [
+    "Fury"
+   ],
+   "text": "[Deflect]",
+   "set": "UNL",
+   "setName": "Unleashed",
+   "tags": [
+    "Poro"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/0c91b90d91c4f988aa9942dd9e06a634a66c6975-744x1039.png?accountingTag=RB",
+   "img": "cards/unl-220-219.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": true,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "ven-r01",
+   "printing_id": "ff53ec1d-5cfd-48cf-8107-61fbcfa13b6f",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "ven-r01",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "VEN",
+   "setName": "Vendetta",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/f95ed6ba0c4d4d357c45bf5bdb1a8e540af1f85f-744x1039.png?accountingTag=RB",
+   "img": "cards/ven-r01.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "ven-sp2-006",
+   "printing_id": "aab9479b-3738-49ce-8440-0d643ebfcfbc",
+   "oracle_id": "f30de1e6-73f9-4b64-9211-791d0fc422e7",
+   "oracleId": "f30de1e6-73f9-4b64-9211-791d0fc422e7",
+   "riftboundId": "ven-sp2-006",
+   "name": "Sona, Harmonious",
+   "cleanName": "Sona, Harmonious",
+   "num": 2,
+   "energy": 4,
+   "might": 4,
+   "power": 1,
+   "type": "Unit",
+   "supertype": "Champion",
+   "rarity": "Showcase",
+   "domains": [
+    "Calm"
+   ],
+   "text": "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes.",
+   "set": "VEN",
+   "setName": "Vendetta",
+   "tags": [
+    "Demacia",
+    "Sona"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/2cc800fbd0011dd084426445ebb1c2831420063d-744x1039.png?accountingTag=RB",
+   "img": "cards/ven-sp2-006.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "ven-t04",
+   "printing_id": "b7e1dcf3-e82e-43ea-9e55-83c9231fe690",
+   "oracle_id": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "oracleId": "86b56235-5e9f-4199-a69b-32be2a5c8c3f",
+   "riftboundId": "ven-t04",
+   "name": "Recruit",
+   "cleanName": "Recruit",
+   "num": 4,
+   "energy": null,
+   "might": 1,
+   "power": null,
+   "type": "Unit",
+   "supertype": "Token",
+   "rarity": "Common",
+   "domains": [
+    "Colorless"
+   ],
+   "text": null,
+   "set": "VEN",
+   "setName": "Vendetta",
+   "tags": [
+    "Recruit"
+   ],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/08b9ccf225fc2ae9eb9b5668e5361b09789210ee-744x1039.png?accountingTag=RB",
+   "img": "cards/ven-t04.png",
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": null
+  },
+  {
+   "id": "tcg:662900",
+   "printing_id": "72364352-ac17-4e93-a3ae-cfb34e293646",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "opp-007b-298",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 7,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/662900_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:662908",
+   "printing_id": "5b56d3a2-960d-49d9-a5d2-3e67fedd8307",
+   "oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185",
+   "oracleId": "df4c1239-7d32-465d-8811-c95ed6827185",
+   "riftboundId": "opp-013-298",
+   "name": "Pouty Poro",
+   "cleanName": "Pouty Poro",
+   "num": 13,
+   "energy": 2,
+   "might": 2,
+   "power": null,
+   "type": "Unit",
+   "supertype": null,
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": "[Deflect] (Opponents must pay :rb_rune_rainbow: to choose me with a spell or ability.)",
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [
+    "Poro"
+   ],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/662908_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:662914",
+   "printing_id": "898c1cab-b297-4f77-9726-301130a4a5a5",
+   "oracle_id": "f2c16cd8-01a4-4357-b741-34db22446e15",
+   "oracleId": "f2c16cd8-01a4-4357-b741-34db22446e15",
+   "riftboundId": "opp-001-298",
+   "name": "Blazing Scorcher",
+   "cleanName": "Blazing Scorcher",
+   "num": 1,
+   "energy": 5,
+   "might": 5,
+   "power": null,
+   "type": "Unit",
+   "supertype": null,
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": "[Accelerate] (You may pay :rb_energy_1::rb_rune_fury: as an additional cost to have me enter ready.)",
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [
+    "Dragon",
+    "Noxus"
+   ],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/662914_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:669265",
+   "printing_id": "dfc7829c-2047-4e2e-bdaa-80b77b34afb0",
+   "oracle_id": "ca7c49d5-0303-485f-a0a9-a3c748d57b92",
+   "oracleId": "ca7c49d5-0303-485f-a0a9-a3c748d57b92",
+   "riftboundId": "opp-017-024",
+   "name": "Annie, Dark Child (Metal)",
+   "cleanName": "Annie, Dark Child",
+   "num": 17,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Legend",
+   "supertype": null,
+   "rarity": "Promo",
+   "domains": [
+    "Fury",
+    "Chaos"
+   ],
+   "text": "At the end of your turn, ready 2 runes.",
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [
+    "Annie"
+   ],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/669265_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:678183",
+   "printing_id": "f874a3a3-51a8-4f45-8c22-3533eb08b1b7",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "sfd-r01",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "SFD",
+   "setName": "Spiritforged",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/12bcd0cde5d9ff4640e82945001e9fef863530f1-744x1039.png?accountingTag=RB",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal"
+   ]
+  },
+  {
+   "id": "tcg:678224",
+   "printing_id": "ca9cfdf2-2067-40dd-8bdf-364423970e1c",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "sfd-r01a",
+   "name": "Fury Rune (Alternate Art)",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Showcase",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "SFD",
+   "setName": "Spiritforged",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/678224_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:680247",
+   "printing_id": "ffada028-a00a-4fd0-8397-66cb573a2fe0",
+   "oracle_id": "ca7c49d5-0303-485f-a0a9-a3c748d57b92",
+   "oracleId": "ca7c49d5-0303-485f-a0a9-a3c748d57b92",
+   "riftboundId": "opp-017-024",
+   "name": "Annie, Dark Child",
+   "cleanName": "Annie, Dark Child",
+   "num": 17,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Legend",
+   "supertype": null,
+   "rarity": "Promo",
+   "domains": [
+    "Fury",
+    "Chaos"
+   ],
+   "text": "At the end of your turn, ready 2 runes.",
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [
+    "Annie"
+   ],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/680247_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:680274",
+   "printing_id": "05af8422-96d8-4bee-a246-cbf56b8be65f",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "sfd-r01b",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "SFD",
+   "setName": "Spiritforged",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/680274_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:692932",
+   "printing_id": "e0586e0e-eb1f-4a01-bf50-cca261d76d30",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "unl-r01a",
+   "name": "Fury Rune (Alternate Art)",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Showcase",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "UNL",
+   "setName": "Unleashed",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/692932_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:694649",
+   "printing_id": "45d341f5-b56a-44c9-a974-0525a7eb2019",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "unl-r01b",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "UNL",
+   "setName": "Unleashed",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/694649_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:696614",
+   "printing_id": "ebfaf940-8a52-451b-9158-39509d90f4e7",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "unl-r01",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "UNL",
+   "setName": "Unleashed",
+   "tags": [],
+   "imgUrl": "https://cmsassets.rgpub.io/sanity/images/dsfx7636/game_data_live/12bcd0cde5d9ff4640e82945001e9fef863530f1-744x1039.png?accountingTag=RB",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal",
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:697499",
+   "printing_id": "65b590db-2538-4a65-991a-fc6162d2e3c3",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "opp-r01c",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/697499_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "normal"
+   ]
+  },
+  {
+   "id": "tcg:709312",
+   "printing_id": "457c75d3-97a6-4263-bdfd-29a41ee2a133",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "ven-r01a",
+   "name": "Fury Rune (Alternate Art)",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Showcase",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "VEN",
+   "setName": "Vendetta",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/709312_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "tcg:709748",
+   "printing_id": "7d56fc49-13fe-4879-9958-b417a547025a",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "opp-r01b",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Common",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "OPP",
+   "setName": "Riftbound Organized Play Promotional Cards",
+   "tags": [],
+   "imgUrl": "https://tcgplayer-cdn.tcgplayer.com/product/709748_in_1000x1000.jpg",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": [
+    "foil"
+   ]
+  },
+  {
+   "id": "dotgg:RAD-T01",
+   "printing_id": "cc59cbf1-f625-45af-bcdd-94c5b0638ecc",
+   "oracle_id": "d39a00ac-cb56-486c-9aaf-08b4162e80bd",
+   "oracleId": "d39a00ac-cb56-486c-9aaf-08b4162e80bd",
+   "riftboundId": "rad-t01",
+   "name": "Bird // Bomb",
+   "cleanName": "Bird // Bomb",
+   "num": 1,
+   "energy": null,
+   "might": 1,
+   "power": null,
+   "type": "Unit",
+   "supertype": "Token",
+   "rarity": "Common",
+   "domains": [
+    "Colorless"
+   ],
+   "text": "[Deflect] (Opponents must pay :rb_rune_rainbow: to choose me with a spell or ability.)",
+   "set": "RAD",
+   "setName": "Radiance",
+   "tags": [
+    "Bird"
+   ],
+   "imgUrl": "https://rifthunt.com/img/cards/rad-t01.webp",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": null,
+   "imgBackUrl": "https://rifthunt.com/img/cards/rad-t01.back.webp",
+   "imgBackHash": "ac0391c685b4"
+  },
+  {
+   "id": "dotgg:RAD-R01b-P",
+   "printing_id": "36f11bc1-1f59-46f9-9c98-822ce9de7f3c",
+   "oracle_id": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "oracleId": "6c57a1de-bdfc-46de-aaa0-0e7cc121537a",
+   "riftboundId": "rad-r01b",
+   "name": "Fury Rune",
+   "cleanName": "Fury Rune",
+   "num": 1,
+   "energy": null,
+   "might": null,
+   "power": null,
+   "type": "Rune",
+   "supertype": "Basic",
+   "rarity": "Promo",
+   "domains": [
+    "Fury"
+   ],
+   "text": null,
+   "set": "RAD",
+   "setName": "Radiance",
+   "tags": [],
+   "imgUrl": "https://rifthunt.com/img/cards/rad-r01b-p.webp",
+   "img": null,
+   "orientation": "portrait",
+   "alt": false,
+   "sig": false,
+   "over": false,
+   "finishes": null,
+   "imgBackUrl": null
+  }
+ ],
+ "fetched": "2026-11-06T21:03:32.635Z",
+ "sets": [
+  {
+   "id": "UNL",
+   "name": "Unleashed",
+   "count": 306,
+   "released": "2026-05-08"
+  },
+  {
+   "id": "VEN",
+   "name": "Vendetta",
+   "count": 243,
+   "released": "2026-07-31"
+  },
+  {
+   "id": "OGN",
+   "name": "Origins",
+   "count": 352,
+   "released": "2025-10-31"
+  },
+  {
+   "id": "SFD",
+   "name": "Spiritforged",
+   "count": 306,
+   "released": "2026-02-13"
+  },
+  {
+   "id": "RAD",
+   "name": "Radiance",
+   "count": 250,
+   "released": "2026-10-23"
+  },
+  {
+   "id": "OGS",
+   "name": "Proving Grounds",
+   "count": 24,
+   "released": "2025-10-31"
+  },
+  {
+   "id": "PR",
+   "name": "Riftbound Promotional Cards",
+   "count": 12,
+   "released": "2025-10-31"
+  },
+  {
+   "id": "OPP",
+   "name": "Riftbound Organized Play Promotional Cards",
+   "count": 221,
+   "released": "2025-10-31"
+  },
+  {
+   "id": "JDG",
+   "name": "Riftbound Judge Promotional Cards",
+   "count": 4,
+   "released": "2025-12-01"
+  },
+  {
+   "id": "RWB",
+   "name": "Riftbound Worlds Bundle 2025",
+   "count": 4,
+   "released": "2025-10-28"
+  },
+  {
+   "id": "SGN",
+   "name": "Secret Garden",
+   "count": 3,
+   "released": "2025-07-30"
+  }
+ ],
+ "source": "riotgames.com"
+}
