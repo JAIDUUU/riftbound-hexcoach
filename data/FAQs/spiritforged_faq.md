@@ -1,8 +1,8 @@
   ---
-  title: <post title>
+  title: Riftbound Spiritforged FAQ
   url: <original post URL>
-  date: 2026-10-15
-  set: <set code>
+  date: 1/13/2026
+  set: SFD
   ---
 
   Riftbound Spiritforged FAQ

@@ -1,8 +1,11 @@
-"""Persistence for chunks: replace the rules chunks and search them.
+"""Persistence for chunks: replace a source's chunks and search across all sources.
 
 Two retrieval primitives (Postgres FTS and pgvector cosine distance) plus the hybrid
 search that fuses their rankings with reciprocal rank fusion. Hybrid is what callers
 should use; the primitives stay public for the keyword-only CLI path and for tests.
+
+Each source type (rules, faq, card_text) is replaced wholesale by its ingest command, so
+re-ingesting never duplicates and never leaves stale chunks behind (ADR 0008 for rules).
 """
 
 from collections.abc import Sequence
@@ -16,24 +19,42 @@ from backend.retrieval.fusion import fuse_rankings
 from backend.retrieval.schema import chunks_table
 from backend.rules.parse import RuleChunk
 
+_COLUMNS = "id, source_type, rule_id, section, text, source_version, source_date, title, source_url"
+
 _KEYWORD_SEARCH = text(
-    """
-    SELECT id, source_type, rule_id, section, text, source_version, source_date
+    f"""
+    SELECT {_COLUMNS}
     FROM chunks
     WHERE search @@ websearch_to_tsquery('english', :query)
-    ORDER BY ts_rank(search, websearch_to_tsquery('english', :query)) DESC, rule_id
+    ORDER BY ts_rank(search, websearch_to_tsquery('english', :query)) DESC, id
     LIMIT :limit
     """
 )
 
 _VECTOR_SEARCH = text(
-    """
-    SELECT id, source_type, rule_id, section, text, source_version, source_date
+    f"""
+    SELECT {_COLUMNS}
     FROM chunks
-    ORDER BY embedding <=> CAST(:embedding AS vector), rule_id
+    ORDER BY embedding <=> CAST(:embedding AS vector), id
     LIMIT :limit
     """
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkRecord:
+    """One chunk ready to insert: text, embedding and all source metadata."""
+
+    text: str
+    embedding: Sequence[float]
+    source_version: str
+    source_date: date
+    rule_id: str | None = None
+    section: str | None = None
+    parent_rule_id: str | None = None
+    is_heading: bool = False
+    title: str | None = None
+    source_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +66,35 @@ class SearchHit:
     text: str
     source_version: str
     source_date: date
+    title: str | None
+    source_url: str | None
+
+
+def replace_chunks(connection: Connection, source_type: str, records: Sequence[ChunkRecord]) -> int:
+    """Make `source_type`'s chunks match `records`; other source types are untouched."""
+    if not records:
+        raise ValueError(f"Refusing to replace {source_type!r} chunks with nothing.")
+    connection.execute(delete(chunks_table).where(chunks_table.c.source_type == source_type))
+    connection.execute(
+        insert(chunks_table),
+        [
+            {
+                "source_type": source_type,
+                "rule_id": record.rule_id,
+                "section": record.section,
+                "parent_rule_id": record.parent_rule_id,
+                "is_heading": record.is_heading,
+                "text": record.text,
+                "source_version": record.source_version,
+                "source_date": record.source_date,
+                "title": record.title,
+                "source_url": record.source_url,
+                "embedding": list(record.embedding),
+            }
+            for record in records
+        ],
+    )
+    return len(records)
 
 
 def replace_rules(
@@ -53,34 +103,25 @@ def replace_rules(
     source_date: date,
     embeddings: Sequence[Sequence[float]],
 ) -> int:
-    """Make the rules chunks match `chunks` (ADR 0008: only the current version is kept).
-
-    `embeddings` must align with `chunks` one to one. Other source types are untouched.
-    Returns the number of chunks written.
-    """
+    """Replace the rules chunks. `embeddings` must align with `chunks` one to one."""
     if not chunks:
         raise ValueError("Refusing to ingest an empty rules document.")
     if len(embeddings) != len(chunks):
         raise ValueError(f"{len(chunks)} chunks but {len(embeddings)} embeddings.")
-    connection.execute(delete(chunks_table).where(chunks_table.c.source_type == "rules"))
-    connection.execute(
-        insert(chunks_table),
-        [
-            {
-                "source_type": "rules",
-                "rule_id": chunk.rule_id,
-                "section": chunk.section,
-                "parent_rule_id": chunk.parent_id,
-                "is_heading": chunk.is_heading,
-                "text": chunk.text,
-                "source_version": source_date.isoformat(),
-                "source_date": source_date,
-                "embedding": list(embedding),
-            }
-            for chunk, embedding in zip(chunks, embeddings, strict=True)
-        ],
-    )
-    return len(chunks)
+    records = [
+        ChunkRecord(
+            text=chunk.text,
+            embedding=embedding,
+            source_version=source_date.isoformat(),
+            source_date=source_date,
+            rule_id=chunk.rule_id,
+            section=chunk.section,
+            parent_rule_id=chunk.parent_id,
+            is_heading=chunk.is_heading,
+        )
+        for chunk, embedding in zip(chunks, embeddings, strict=True)
+    ]
+    return replace_chunks(connection, "rules", records)
 
 
 def _hits(connection: Connection, statement: Any, params: dict[str, object]) -> list[SearchHit]:
@@ -94,6 +135,8 @@ def _hits(connection: Connection, statement: Any, params: dict[str, object]) -> 
             text=row["text"],
             source_version=row["source_version"],
             source_date=row["source_date"],
+            title=row["title"],
+            source_url=row["source_url"],
         )
         for row in rows
     ]

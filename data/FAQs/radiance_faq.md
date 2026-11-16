@@ -1,6 +1,6 @@
   ---
   title: Radiance Rules FAQ and Clarifications
-  url: [<original post URL>](https://playriftbound.com/en-us/news/organizedplay/radiance-rules-faq-and-clarifications/)
+  url: https://playriftbound.com/en-us/news/organizedplay/radiance-rules-faq-and-clarifications/
   date: 10/26/2026
   set: RAD
   ---

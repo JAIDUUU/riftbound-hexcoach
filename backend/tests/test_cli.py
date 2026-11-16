@@ -69,9 +69,29 @@ def test_a_search_hit_shows_rule_id_section_origin_and_first_line() -> None:
         "Example: not shown in the summary line.",
         source_version="2026-10-09",
         source_date=date(2026, 10, 9),
+        title=None,
+        source_url=None,
     )
 
     assert format_hit(hit) == (
         "054.1 \u00b7 \u201cCan\u2019t beats Can\u201d \u00b7 rules 2026-10-09\n"
         "  Cards that forbid actions or effects supersede cards that allow them."
+    )
+
+
+def test_a_faq_hit_shows_its_title_and_section() -> None:
+    hit = SearchHit(
+        chunk_id=2,
+        source_type="faq",
+        rule_id=None,
+        section="Scoring",
+        text="Q: How do I score?\nA: By conquering or holding.",
+        source_version="OGN",
+        source_date=date(2025, 10, 16),
+        title="Riftbound Origins FAQ",
+        source_url="https://example.com/origins-faq/",
+    )
+
+    assert format_hit(hit) == (
+        "Riftbound Origins FAQ \u00b7 Scoring \u00b7 faq 2025-10-16\n  Q: How do I score?"
     )

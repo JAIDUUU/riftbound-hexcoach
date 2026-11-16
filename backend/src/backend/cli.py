@@ -19,7 +19,7 @@ from backend.cards.snapshot import (
     write_json,
     write_snapshot,
 )
-from backend.config import CARDS_DATA_DIR, GOLDEN_SET_PATH, RULES_DATA_DIR
+from backend.config import CARDS_DATA_DIR, FAQS_DATA_DIR, GOLDEN_SET_PATH, RULES_DATA_DIR
 
 CORE_RULES_PDF_GLOB = "RiftboundCoreRules-*.pdf"
 
@@ -50,18 +50,93 @@ def _migrate(_: argparse.Namespace) -> int:
     return 0
 
 
+def card_text_chunk(card: Card) -> str:
+    """What gets embedded and searched for a card: its name, type line and cleaned text."""
+    type_line = f"{card.supertype} {card.card_type}" if card.supertype else card.card_type
+    return f"{card.oracle_name} ({type_line})\n{card.cleaned_text}"
+
+
 def _load_cards(_: argparse.Namespace) -> int:
     from backend.cards.repository import sync_cards
     from backend.db import make_engine
+    from backend.retrieval.embedding import embedder
+    from backend.retrieval.repository import ChunkRecord, replace_chunks
 
     cards = collapse_printings(read_snapshot(CARDS_DATA_DIR / SNAPSHOT_FILENAME))
+    with_text = [card for card in cards if card.cleaned_text]
+    print(f"Embedding {len(with_text)} card texts (bge-small, in-process)\u2026")
+    embeddings = embedder().embed_passages([card_text_chunk(card) for card in with_text])
+    snapshot_date = cards[0].snapshot_fetched.date()
+    records = [
+        ChunkRecord(
+            text=card_text_chunk(card),
+            embedding=embedding,
+            source_version=snapshot_date.isoformat(),
+            source_date=snapshot_date,
+            title=card.oracle_name,
+        )
+        for card, embedding in zip(with_text, embeddings, strict=True)
+    ]
+
     engine = make_engine()
     with engine.begin() as connection:
         written = sync_cards(connection, cards)
+        indexed = replace_chunks(connection, "card_text", records)
     engine.dispose()
-    print(f"Synced {written} cards to the database.")
+    print(f"Synced {written} cards; indexed {indexed} card-text chunks (snapshot {snapshot_date}).")
     report_data_problems(cards)
     return 0
+
+
+def _ingest_faqs(_: argparse.Namespace) -> int:
+    from backend.db import make_engine
+    from backend.faqs.parse import FaqDocument, FaqParseError, load_faq
+    from backend.retrieval.embedding import embedder
+    from backend.retrieval.repository import ChunkRecord, replace_chunks
+
+    paths = sorted(FAQS_DATA_DIR.glob("*.md"))
+    if not paths:
+        raise SystemExit(f"No FAQ files found in {FAQS_DATA_DIR}.")
+    documents: list[FaqDocument] = []
+    failed = False
+    for path in paths:
+        try:
+            document = load_faq(path)
+        except FaqParseError as error:
+            print(f"error: {error} \u2014 file skipped, fix its header and re-run")
+            failed = True
+            continue
+        for warning in document.warnings:
+            print(f"warning: {path.name}: {warning}")
+        documents.append(document)
+    if not documents:
+        print("No FAQ file could be parsed; nothing was ingested.")
+        return 1
+
+    texts = [chunk.text for document in documents for chunk in document.chunks]
+    print(f"Embedding {len(texts)} FAQ chunks (bge-small, in-process)\u2026")
+    embeddings = iter(embedder().embed_passages(texts))
+    records = [
+        ChunkRecord(
+            text=chunk.text,
+            embedding=next(embeddings),
+            source_version=document.set_code,
+            source_date=document.date,
+            section=chunk.section,
+            title=document.title,
+            source_url=document.url,
+        )
+        for document in documents
+        for chunk in document.chunks
+    ]
+
+    engine = make_engine()
+    with engine.begin() as connection:
+        written = replace_chunks(connection, "faq", records)
+    engine.dispose()
+    titles = ", ".join(f"{d.title} ({d.date})" for d in documents)
+    print(f"Ingested {written} FAQ chunks from {len(documents)} files: {titles}.")
+    return 1 if failed else 0
 
 
 def format_card(card: Card) -> str:
@@ -122,7 +197,8 @@ def format_hit(hit: "SearchHit") -> str:
     if len(first_line) > 160:
         first_line = first_line[:159] + "\u2026"
     origin = f"{hit.source_type} {hit.source_date.isoformat()}"
-    header = " \u00b7 ".join(part for part in (hit.rule_id, hit.section, origin) if part)
+    parts = (hit.rule_id, hit.title, hit.section, origin)
+    header = " \u00b7 ".join(part for part in parts if part)
     return f"{header}\n  {first_line}"
 
 
@@ -242,6 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     lookup.add_argument("name", nargs="+", help="Card name, e.g. Sona, Harmonious")
     ingest = add("ingest-rules", _ingest_rules, "Chunk the Core Rules PDF into the database.")
     ingest.add_argument("--pdf", help=f"Rules PDF (default: newest {CORE_RULES_PDF_GLOB})")
+    add("ingest-faqs", _ingest_faqs, "Chunk the FAQ files in data/FAQs into the database.")
     searcher = add("search", _search, "Hybrid (keyword + vector) search across the chunks.")
     searcher.add_argument("query", nargs="+", help="Search terms, e.g. combat damage order")
     searcher.add_argument("-k", "--limit", type=int, default=10, help="Max hits (default 10)")

@@ -31,6 +31,7 @@ uv run backend migrate         # apply Alembic migrations (re-runnable; enables 
 uv run backend load-cards      # sync the committed snapshot into the cards table
 uv run backend card <name>     # look a card up by oracle name or alias and print its cleaned text
 uv run backend ingest-rules    # chunk + embed the newest Core Rules PDF in data/rules into the DB
+uv run backend ingest-faqs     # chunk + embed the FAQ files in data/FAQs into the database
 uv run backend search <query>  # hybrid keyword+vector search across the chunks (-k for more hits)
 uv run backend ask <prompt>    # smoke-test the LLM provider fallback chain with one prompt
 uv run backend check-golden    # validate data/golden/golden-set.yaml
@@ -50,6 +51,24 @@ parent rule as metadata), checks that the numbering came out sequential, embeds 
 and replaces the previous rules version in the `chunks` table (ADR 0008: single current
 version). The rules version is the document's own "Last Updated" date. The Tournament Rules
 PDF in `data/rules/` is a separate document (organized-play procedures) and is not ingested.
+
+### Retrieval sources
+
+Three source types live in the `chunks` table and all come back from `search`, each hit
+showing its source type and date:
+
+- **rules** — one chunk per Core Rules rule number (`ingest-rules`)
+- **faq** — official post-set FAQ posts from `data/FAQs/*.md` (`ingest-faqs`); each file
+  needs a frontmatter header (title, url, date, set) and is chunked by Q/A pair, with
+  essay-style rulings grouped into paragraph chunks under their headings
+- **card_text** — each card's name, type line and cleaned text (`load-cards`, which keeps
+  the chunks in sync with the cards table; stamped with the snapshot date)
+
+Each ingest command replaces its own source type wholesale, so re-running never
+duplicates. When sources conflict, downstream consumers apply source precedence
+(ADR 0001: FAQ > card text > rules, newer FAQ first) via
+`backend.retrieval.precedence.order_by_precedence`; `search` itself ranks purely by
+relevance.
 
 ### Embeddings and hybrid search
 

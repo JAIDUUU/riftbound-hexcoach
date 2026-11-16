@@ -6,7 +6,9 @@ from sqlalchemy import Connection, func, select
 
 from backend.retrieval.embedding import EMBEDDING_DIMENSIONS
 from backend.retrieval.repository import (
+    ChunkRecord,
     hybrid_search_chunks,
+    replace_chunks,
     replace_rules,
     search_chunks,
     vector_search_chunks,
@@ -109,6 +111,41 @@ def test_reingesting_keeps_a_single_rules_version(
 
 def test_search_without_matches_returns_nothing(ingested: Connection) -> None:
     assert search_chunks(ingested, "xyzzy plugh") == []
+
+
+def test_search_returns_chunks_from_all_three_sources(ingested: Connection) -> None:
+    faq = ChunkRecord(
+        text="Q: Does the zorblax rule apply?\nA: Yes, the zorblax rule always applies.",
+        embedding=pointing_at(100),
+        source_version="OGN",
+        source_date=date(2025, 10, 16),
+        section="Scoring",
+        title="Riftbound Origins FAQ",
+        source_url="https://example.com/origins-faq/",
+    )
+    card = ChunkRecord(
+        text="Snackbeast (Unit)\nWhen you play me, zorblax a unit.",
+        embedding=pointing_at(101),
+        source_version="2026-11-06",
+        source_date=date(2026, 11, 6),
+        title="Snackbeast",
+    )
+    replace_chunks(ingested, "faq", [faq])
+    replace_chunks(ingested, "card_text", [card])
+
+    hits = search_chunks(ingested, "zorblax")
+
+    assert {hit.source_type for hit in hits} == {"faq", "card_text"}
+    faq_hit = next(hit for hit in hits if hit.source_type == "faq")
+    assert faq_hit.title == "Riftbound Origins FAQ"
+    assert faq_hit.source_url == "https://example.com/origins-faq/"
+    assert faq_hit.source_date == date(2025, 10, 16)
+    # Re-replacing one source leaves the others alone.
+    replace_chunks(ingested, "faq", [faq])
+    assert {hit.source_type for hit in search_chunks(ingested, "zorblax")} == {
+        "faq",
+        "card_text",
+    }
 
 
 def test_ingesting_an_empty_document_is_refused(db_connection: Connection) -> None:

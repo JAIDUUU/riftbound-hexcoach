@@ -36,6 +36,8 @@ chunks_table = Table(
     Column("text", Text, nullable=False),
     Column("source_version", Text, nullable=False),
     Column("source_date", Date, nullable=False),
+    Column("title", Text),
+    Column("source_url", Text),
     Column("search", TSVECTOR, Computed("to_tsvector('english', text)", persisted=True)),
     Column("embedding", Vector(EMBEDDING_DIMENSIONS), nullable=False),
 )

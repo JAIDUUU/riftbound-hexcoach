@@ -9,6 +9,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_DIR.parent
 CARDS_DATA_DIR = REPO_ROOT / "data" / "cards"
 RULES_DATA_DIR = REPO_ROOT / "data" / "rules"
+FAQS_DATA_DIR = REPO_ROOT / "data" / "FAQs"
 GOLDEN_SET_PATH = REPO_ROOT / "data" / "golden" / "golden-set.yaml"
 
 
