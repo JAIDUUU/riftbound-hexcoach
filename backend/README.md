@@ -32,6 +32,7 @@ uv run backend load-cards      # sync the committed snapshot into the cards tabl
 uv run backend card <name>     # look a card up by oracle name or alias and print its cleaned text
 uv run backend ingest-rules    # chunk the newest Core Rules PDF in data/rules into the database
 uv run backend search <query>  # full-text search across the ingested chunks (-k for more hits)
+uv run backend ask <prompt>    # smoke-test the LLM provider fallback chain with one prompt
 ```
 
 `refresh-cards` rewrites `data/cards/rifthunt-snapshot.json` (one card per line, so diffs stay

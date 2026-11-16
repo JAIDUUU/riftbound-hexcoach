@@ -138,6 +138,17 @@ def _search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ask(args: argparse.Namespace) -> int:
+    from backend.llm.providers import chat_chain
+
+    chain = chat_chain()
+    for provider in chain.skipped:
+        print(f"note: {provider} has no API key and was skipped")
+    provider, message = chain.ask(" ".join(args.prompt))
+    print(f"[{provider}] {message.text()}")
+    return 0
+
+
 def _card(args: argparse.Namespace) -> int:
     from backend.cards.repository import find_by_oracle_name
     from backend.db import make_engine
@@ -179,6 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
     searcher = add("search", _search, "Full-text search across the ingested chunks.")
     searcher.add_argument("query", nargs="+", help="Search terms, e.g. combat damage order")
     searcher.add_argument("-k", "--limit", type=int, default=10, help="Max hits (default 10)")
+    asker = add("ask", _ask, "Send one prompt through the real provider chain (smoke test).")
+    asker.add_argument("prompt", nargs="+", help="The prompt to send")
     return parser
 
 

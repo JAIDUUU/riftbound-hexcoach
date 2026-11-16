@@ -23,9 +23,14 @@ def to_sqlalchemy_url(url: str) -> str:
     return url
 
 
-def database_url() -> str:
+def optional_env(name: str) -> str | None:
+    """A setting from the environment or `backend/.env`; None when unset or blank."""
     load_dotenv(BACKEND_DIR / ".env")
-    url = os.environ.get("DATABASE_URL", "").strip()
-    if not url:
+    return os.environ.get(name, "").strip() or None
+
+
+def database_url() -> str:
+    url = optional_env("DATABASE_URL")
+    if url is None:
         raise MissingConfigError("DATABASE_URL is not set (see backend/.env.example).")
     return to_sqlalchemy_url(url)
