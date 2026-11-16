@@ -90,6 +90,35 @@ A short closing ruling.
     assert prose[2].text == "A short closing ruling."
 
 
+def test_bare_question_paragraphs_become_qa_chunks() -> None:
+    document = parse_faq(
+        HEADER
+        + """
+What happens when you play Abandon on a spell played for its Flow cost?
+
+It will be banished when it attempts to leave the chain.
+
+A longer explanation paragraph about why that happens in some detail.
+
+Relevant Rules: 359.3.f.1., 359.3.f.2.
+
+What is the difference between the two uses of \u201cthis battlefield\u201d?
+
+The first refers to the battlefield that she held.
+"""
+    )
+
+    questions = [chunk for chunk in document.chunks if chunk.is_question]
+    assert len(questions) == 2
+    assert questions[0].text.startswith(
+        "Q: What happens when you play Abandon on a spell played for its Flow cost?\n"
+        "A: It will be banished when it attempts to leave the chain."
+    )
+    assert "Relevant Rules: 359.3.f.1., 359.3.f.2." in questions[0].text
+    assert "difference" not in questions[0].text
+    assert questions[1].text.endswith("The first refers to the battlefield that she held.")
+
+
 def test_a_heading_after_a_blank_line_ends_a_question_block() -> None:
     document = parse_faq(
         HEADER

@@ -5,8 +5,9 @@ by era, so three shapes are handled:
 
 - "Q:" question lines with the answer following (Origins, Spiritforged)
 - bold "**question**" lines with the answer following (Radiance)
-- essay-style rulings under bare topic headings (Unleashed, Vendetta), which become
-  paragraph chunks grouped under their heading
+- bare question lines, a whole paragraph ending in "?" (Vendetta)
+- essay-style rulings under bare topic headings (Unleashed), which become paragraph
+  chunks grouped under their heading
 
 A file with an unusable header (missing or still a "<placeholder>") is reported rather
 than guessed at; a missing url alone is a warning because it only affects provenance.
@@ -160,6 +161,9 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
             if line and _is_heading(line) and any(answer) and after_blank:
                 end_question()
                 section = line
+            elif line.endswith("?") and any(answer) and after_blank:
+                end_question()
+                question = line
             else:
                 answer.append(line)
             continue
@@ -169,6 +173,9 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
             end_paragraph()
             _flush_prose(prose, section, chunks)
             section = line
+        elif not paragraph and line.endswith("?"):
+            # A whole paragraph that is just a question (Vendetta style) starts a Q/A.
+            question = line
         else:
             paragraph.append(line)
     end_question()
