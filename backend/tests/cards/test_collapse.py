@@ -1,14 +1,7 @@
 from datetime import UTC, datetime
-from typing import Any
 
-import pytest
-
-from backend.cards.collapse import Card, collapse_printings
-
-
-@pytest.fixture(scope="module")
-def cards_by_name(rifthunt_sample: dict[str, Any]) -> dict[str, Card]:
-    return {card.oracle_name: card for card in collapse_printings(rifthunt_sample)}
+from backend.cards.collapse import Card
+from backend.cards.rifthunt import RifthuntSnapshot
 
 
 def test_printings_collapse_to_one_card_per_oracle_id(cards_by_name: dict[str, Card]) -> None:
@@ -83,7 +76,7 @@ def test_raw_text_is_kept_next_to_the_cleaned_text(cards_by_name: dict[str, Card
 
 
 def test_card_carries_image_path_and_snapshot_date(
-    cards_by_name: dict[str, Card], rifthunt_sample: dict[str, Any]
+    cards_by_name: dict[str, Card], rifthunt_sample: RifthuntSnapshot
 ) -> None:
     scorcher = cards_by_name["Blazing Scorcher"]
 

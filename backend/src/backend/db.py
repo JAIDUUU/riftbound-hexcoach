@@ -13,6 +13,4 @@ def make_engine() -> Engine:
 
 def upgrade_to_head() -> None:
     """Apply every pending Alembic migration. Re-running is a no-op."""
-    config = Config(str(BACKEND_DIR / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND_DIR / "src" / "backend" / "migrations"))
-    command.upgrade(config, "head")
+    command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")

@@ -1,6 +1,6 @@
 # HexCoach: Grill Decisions
 
-**Status: COMPLETE.** The grilling session reached a shared understanding. Nothing has been implemented yet.
+**Status: COMPLETE.** The grilling session reached a shared understanding. Implementation is under way; where this document and an ADR disagree, the ADR wins.
 Source plan: [The Plan.md](The%20Plan.md). Glossary: [CONTEXT.md](CONTEXT.md). Architecture decisions: [adr/](adr/).
 
 ## Settled decisions
@@ -34,7 +34,7 @@ Source plan: [The Plan.md](The%20Plan.md). Glossary: [CONTEXT.md](CONTEXT.md). A
 
 ### Cards
 - **Data source:** snapshot of Rifthunt's `/bulk/cards` (`https://api.rifthunt.com`), committed to the repo with its fetched date and refreshed by a manual script. No runtime API calls. Rifthunt needs no key, and says its data is free for any use and unofficial Riot Fan Content.
-- **Card identity:** one card is one `oracle_id` (the id Rifthunt shares across all printings). Mentions, `@` search and decklists match on `oracle_name`. Printings (Metal, alternate, overnumbered) collapse into the plain one, since card text is identical.
+- **Card identity:** one card is one `oracle_id` (the id Rifthunt shares across all printings). Mentions, `@` search and decklists match on `oracle_name`; other names sharing an `oracle_id` are kept as aliases and also match. Printings (Metal, alternate, overnumbered) collapse into one representative printing (plain over variant, official over third-party, then the latest set release), since printing text can differ. See [ADR 0002](adr/0002-rifthunt-card-snapshot.md).
 - **Card text:** raw and cleaned text are both stored. Cleaning is a deterministic step at ingestion: `:rb_*:` icon shortcodes become words (for example `:rb_energy_1:` becomes "1 Energy") and keyword brackets are stripped. Retrieval and prompts use the cleaned text.
 - **Images:** hotlinked from `images.rifthunt.com`, "normal" (480w) size for hover previews, with a text fallback when the image fails. Not stored. Hotlinking is **not verified** as allowed.
 - **Card mentions in answers:** the model wraps cards as `[[Card Name]]`. The backend validates each against the card database, and the frontend only renders hover previews for validated ones. Unvalidated `[[X]]` is shown as plain text.
@@ -120,9 +120,8 @@ Source plan: [The Plan.md](The%20Plan.md). Glossary: [CONTEXT.md](CONTEXT.md). A
 - Verify the free-tier limits (Gemini, Groq, OpenRouter, Supabase, hosting) and set the rate-limit numbers.
 - Confirm that hotlinking Rifthunt images is acceptable.
 - Confirm Langfuse trace retention for the privacy note.
-- Obtain the rules document and the official FAQs for `data/`.
+- Obtain the core rules document for `data/rules/` (the official FAQs and the tournament rules are already committed).
 - Pick the backend host at deployment time.
-- Find and install a `domain-modeling` skill (not installed at the time of grilling).
 
 ## Unverified facts (do not rely on them)
 - Riot's fan-content / Riftbound digital-tools policy and what it allows.

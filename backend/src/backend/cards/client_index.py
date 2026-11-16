@@ -1,12 +1,27 @@
 """Static card index for the frontend `@` menu (a plain JSON-serialisable structure)."""
 
 from collections.abc import Sequence
-from typing import Any
+from typing import TypedDict
 
 from backend.cards.collapse import Card
+from backend.cards.vocabulary import CardType, Domain
 
 
-def build_client_index(cards: Sequence[Card]) -> dict[str, Any]:
+class ClientIndexEntry(TypedDict):
+    id: str
+    name: str
+    aliases: list[str]
+    type: CardType
+    domains: list[Domain]
+    image: str | None
+
+
+class ClientIndex(TypedDict):
+    fetched: str | None
+    cards: list[ClientIndexEntry]
+
+
+def build_client_index(cards: Sequence[Card]) -> ClientIndex:
     return {
         "fetched": cards[0].snapshot_fetched.isoformat() if cards else None,
         "cards": [

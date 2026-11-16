@@ -32,7 +32,7 @@ def _to_row(card: Card) -> dict[str, Any]:
     return row
 
 
-def _to_card(row: Mapping[str, Any]) -> Card:
+def _card_from_row(row: Mapping[str, Any]) -> Card:
     fields = dict(row)
     fields["oracle_id"] = str(fields["oracle_id"])
     for field in _LIST_FIELDS:
@@ -62,4 +62,4 @@ def sync_cards(connection: Connection, cards: Sequence[Card]) -> int:
 def find_by_oracle_name(connection: Connection, name: str) -> Card | None:
     """Find a card by oracle name or alias, ignoring case. Printings never matter."""
     row = connection.execute(_FIND_BY_NAME, {"name": name.strip().lower()}).mappings().first()
-    return _to_card(dict(row)) if row else None
+    return _card_from_row(dict(row)) if row else None

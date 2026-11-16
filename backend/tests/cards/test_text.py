@@ -1,4 +1,4 @@
-from backend.cards.text import clean_card_text
+from backend.cards.text import clean_card_text, leftover_shortcodes
 
 
 def test_energy_icon_becomes_words() -> None:
@@ -70,6 +70,16 @@ def test_blank_lines_and_stray_spaces_are_dropped() -> None:
 
 def test_unknown_icon_shortcodes_stay_visible_so_they_can_be_reported() -> None:
     assert clean_card_text("Gain :rb_mystery: now.") == "Gain :rb_mystery: now."
+
+
+def test_leftover_shortcodes_finds_what_cleaning_left_behind() -> None:
+    cleaned = clean_card_text("Gain :rb_mystery: and :rb_energy_2:, then :rb_mystery: again.")
+
+    assert leftover_shortcodes(cleaned) == [":rb_mystery:", ":rb_mystery:"]
+
+
+def test_fully_cleaned_text_has_no_leftover_shortcodes() -> None:
+    assert leftover_shortcodes(clean_card_text("[Assault 2] Pay :rb_energy_1:.")) == []
 
 
 def test_exhaust_cost_becomes_a_word() -> None:

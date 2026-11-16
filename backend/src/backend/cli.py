@@ -1,11 +1,11 @@
 """Command line entrypoint for the HexCoach backend."""
 
 import argparse
-import re
 from collections.abc import Callable, Sequence
 
 from backend.cards.client_index import build_client_index
 from backend.cards.collapse import Card, collapse_printings
+from backend.cards.quality import data_problems
 from backend.cards.snapshot import (
     CLIENT_INDEX_FILENAME,
     SNAPSHOT_FILENAME,
@@ -16,23 +16,10 @@ from backend.cards.snapshot import (
 )
 from backend.config import CARDS_DATA_DIR
 
-_LEFTOVER_SHORTCODE = re.compile(r":rb_[a-z0-9_]+:")
 
-
-def _unknown_shortcodes(cards: Sequence[Card]) -> dict[str, list[str]]:
-    found: dict[str, list[str]] = {}
-    for card in cards:
-        for shortcode in _LEFTOVER_SHORTCODE.findall(card.cleaned_text):
-            found.setdefault(shortcode, []).append(card.oracle_name)
-    return found
-
-
-def _report_unknown_shortcodes(cards: Sequence[Card]) -> None:
-    for shortcode, names in sorted(_unknown_shortcodes(cards).items()):
-        print(
-            f"warning: unknown icon {shortcode} left in the text of "
-            f"{len(names)} card(s), e.g. {names[0]}"
-        )
+def report_data_problems(cards: Sequence[Card]) -> None:
+    for problem in data_problems(cards):
+        print(f"warning: {problem}")
 
 
 def _refresh_cards(_: argparse.Namespace) -> int:
@@ -44,7 +31,7 @@ def _refresh_cards(_: argparse.Namespace) -> int:
         f"Snapshot of {len(snapshot['cards'])} printings fetched {snapshot['fetched']}: "
         f"{len(cards)} cards. Wrote {SNAPSHOT_FILENAME} and {CLIENT_INDEX_FILENAME}."
     )
-    _report_unknown_shortcodes(cards)
+    report_data_problems(cards)
     return 0
 
 
@@ -66,11 +53,11 @@ def _load_cards(_: argparse.Namespace) -> int:
         written = sync_cards(connection, cards)
     engine.dispose()
     print(f"Synced {written} cards to the database.")
-    _report_unknown_shortcodes(cards)
+    report_data_problems(cards)
     return 0
 
 
-def _format_card(card: Card) -> str:
+def format_card(card: Card) -> str:
     stats = [
         f"{label} {value}"
         for label, value in (("Energy", card.energy), ("Might", card.might), ("Power", card.power))
@@ -95,7 +82,7 @@ def _card(args: argparse.Namespace) -> int:
     if card is None:
         print("No card with that name.")
         return 1
-    print(_format_card(card))
+    print(format_card(card))
     return 0
 
 

@@ -3,12 +3,10 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
+from backend.cards.rifthunt import RifthuntPrinting, RifthuntSnapshot
 from backend.cards.text import clean_card_text
-
-type Printing = Mapping[str, Any]
-type Snapshot = Mapping[str, Any]
+from backend.cards.vocabulary import CardType, Domain, Rarity, Supertype
 
 # Rifthunt marks third-party printings only through the prefix of its legacy `id` field.
 # This is the one place that field is read; identity everywhere else is `riftboundId`.
@@ -25,43 +23,45 @@ class Card:
     oracle_id: str
     oracle_name: str
     aliases: tuple[str, ...]
-    card_type: str
-    supertype: str | None
-    domains: tuple[str, ...]
+    card_type: CardType
+    supertype: Supertype | None
+    domains: tuple[Domain, ...]
     energy: int | None
     might: int | None
     power: int | None
-    rarity: str | None
+    rarity: Rarity
     tags: tuple[str, ...]
     raw_text: str
     cleaned_text: str
     representative_id: str
     set_code: str
     image_path: str | None
-    image_url: str | None
+    image_url: str
     printing_count: int
     snapshot_fetched: datetime
 
 
-def _is_plain(printing: Printing) -> bool:
+def _is_plain(printing: RifthuntPrinting) -> bool:
     """A plain printing is not alternate art, signature or overnumbered, and has no name suffix."""
     return not (
-        printing.get("alt")
-        or printing.get("sig")
-        or printing.get("over")
+        printing["alt"]
+        or printing["sig"]
+        or printing["over"]
         or printing["name"] != printing["cleanName"]
     )
 
 
-def _is_official(printing: Printing) -> bool:
-    return not str(printing["id"]).startswith(_THIRD_PARTY_ID_PREFIXES)
+def _is_official(printing: RifthuntPrinting) -> bool:
+    return not printing["id"].startswith(_THIRD_PARTY_ID_PREFIXES)
 
 
-def _stable_order(printing: Printing) -> tuple[str, str]:
-    return str(printing["riftboundId"]), str(printing["printing_id"])
+def _stable_order(printing: RifthuntPrinting) -> tuple[str, str]:
+    return printing["riftboundId"], printing["printing_id"]
 
 
-def _representative(printings: Iterable[Printing], released: Mapping[str, str]) -> Printing:
+def _representative(
+    printings: Iterable[RifthuntPrinting], released: Mapping[str, str]
+) -> RifthuntPrinting:
     """Pick the printing whose text and stats define the card.
 
     Preference: plain over variant, official id over third-party id, then the latest set
@@ -78,40 +78,42 @@ def _representative(printings: Iterable[Printing], released: Mapping[str, str]) 
     )
 
 
-def _to_card(printings: list[Printing], released: Mapping[str, str], fetched: datetime) -> Card:
+def _card_from_group(
+    printings: list[RifthuntPrinting], released: Mapping[str, str], fetched: datetime
+) -> Card:
     chosen = _representative(printings, released)
-    oracle_name = str(chosen["cleanName"])
-    raw_text = chosen.get("text") or ""
-    other_names = {str(printing["cleanName"]) for printing in printings} - {oracle_name}
+    oracle_name = chosen["cleanName"]
+    raw_text = chosen["text"] or ""
+    other_names = {printing["cleanName"] for printing in printings} - {oracle_name}
     return Card(
-        oracle_id=str(chosen["oracle_id"]),
+        oracle_id=chosen["oracle_id"],
         oracle_name=oracle_name,
         aliases=tuple(sorted(other_names)),
-        card_type=str(chosen["type"]),
-        supertype=chosen.get("supertype"),
-        domains=tuple(chosen.get("domains") or ()),
-        energy=chosen.get("energy"),
-        might=chosen.get("might"),
-        power=chosen.get("power"),
-        rarity=chosen.get("rarity"),
-        tags=tuple(chosen.get("tags") or ()),
+        card_type=chosen["type"],
+        supertype=chosen["supertype"],
+        domains=tuple(chosen["domains"]),
+        energy=chosen["energy"],
+        might=chosen["might"],
+        power=chosen["power"],
+        rarity=chosen["rarity"],
+        tags=tuple(chosen["tags"]),
         raw_text=raw_text,
         cleaned_text=clean_card_text(raw_text),
-        representative_id=str(chosen["riftboundId"]),
-        set_code=str(chosen["set"]),
-        image_path=chosen.get("img"),
-        image_url=chosen.get("imgUrl"),
+        representative_id=chosen["riftboundId"],
+        set_code=chosen["set"],
+        image_path=chosen["img"],
+        image_url=chosen["imgUrl"],
         printing_count=len(printings),
         snapshot_fetched=fetched,
     )
 
 
-def collapse_printings(snapshot: Snapshot) -> list[Card]:
+def collapse_printings(snapshot: RifthuntSnapshot) -> list[Card]:
     """Turn a Rifthunt bulk snapshot into one Card per oracle id, sorted by oracle name."""
-    released = {str(entry["id"]): str(entry["released"]) for entry in snapshot["sets"]}
+    released = {entry["id"]: entry["released"] for entry in snapshot["sets"]}
     fetched = datetime.fromisoformat(snapshot["fetched"])
-    by_oracle_id: dict[str, list[Printing]] = {}
+    by_oracle_id: dict[str, list[RifthuntPrinting]] = {}
     for printing in snapshot["cards"]:
         by_oracle_id.setdefault(printing["oracle_id"], []).append(printing)
-    cards = (_to_card(group, released, fetched) for group in by_oracle_id.values())
+    cards = (_card_from_group(group, released, fetched) for group in by_oracle_id.values())
     return sorted(cards, key=lambda card: card.oracle_name)

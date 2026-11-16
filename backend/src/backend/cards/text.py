@@ -39,3 +39,8 @@ def clean_card_text(raw: str | None) -> str:
         text = text.replace(symbol, replacement)
     text = _ICON_RUN.sub(_icon_run_to_words, text)
     return _tidy_lines(_KEYWORD_BRACKETS.sub(r"\1", text))
+
+
+def leftover_shortcodes(cleaned: str) -> list[str]:
+    """Icon shortcodes still present after cleaning: the ones `clean_card_text` doesn't know."""
+    return _ICON.findall(cleaned)

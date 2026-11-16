@@ -41,7 +41,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["integration: needs a real database (DATABASE_URL); skipped otherwise"]
+# Integration tests touch the database behind DATABASE_URL, so they never run by accident:
+# they must be asked for with `pytest -m integration` (and still skip without DATABASE_URL).
+addopts = '-m "not integration"'
+markers = ["integration: needs a real database (DATABASE_URL); deselected unless -m integration"]
 
 [tool.pyright]
 include = ["src", "tests"]

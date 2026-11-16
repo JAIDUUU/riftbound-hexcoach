@@ -4,11 +4,11 @@ Domain terms used across the code and docs. See [Grill Decisions.md](Grill%20Dec
 
 ## Cards
 
-- **Card:** a distinct Riftbound card, identified by its `oracle_id`. All printings of the same card are the same Card, because card text is identical.
-- **Printing:** one physical version of a Card (plain, Metal, alternate art, overnumbered, signature). Rifthunt gives each a `printing_id`. We collapse printings into the plain one.
+- **Card:** a distinct Riftbound card, identified by its `oracle_id`. All printings of the same card are the same Card; its text and stats come from one representative printing, because printing text can differ (see [ADR 0002](adr/0002-rifthunt-card-snapshot.md)).
+- **Printing:** one physical version of a Card (plain, Metal, alternate art, overnumbered, signature). Rifthunt gives each a `printing_id`. We collapse printings into one representative printing: plain over variant, official over third-party, then the latest set release.
 - **Oracle id:** the id shared by every printing of the same Card. The term comes from Magic databases.
 - **Oracle name:** the base card name shared by all printings, without a variant suffix. Mentions, `@` search and decklists match on it.
-- **Cleaned text:** a card's rules text after ingestion cleanup: icon shortcodes (such as `:rb_energy_1:`) rewritten as words and keyword brackets stripped. Used for retrieval and prompts. The **raw text** is kept alongside it.
+- **Cleaned text:** a card's rules text after ingestion cleanup: icon shortcodes (such as `:rb_energy_1:`) rewritten as words, keyword brackets stripped and cost arrows normalised (details in [ADR 0002](adr/0002-rifthunt-card-snapshot.md)). Used for retrieval and prompts. The **raw text** is kept alongside it.
 - **Card snapshot:** the committed copy of Rifthunt's bulk card data, with its fetched date.
 
 ## Decks
