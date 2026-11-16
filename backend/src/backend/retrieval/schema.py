@@ -5,6 +5,7 @@ as further source types later (issue #5). The `search` column is a stored tsvect
 in sync by Postgres itself, so full-text search needs no application-side indexing step.
 """
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -18,6 +19,8 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
+
+from backend.retrieval.embedding import EMBEDDING_DIMENSIONS
 
 metadata = MetaData()
 
@@ -34,9 +37,16 @@ chunks_table = Table(
     Column("source_version", Text, nullable=False),
     Column("source_date", Date, nullable=False),
     Column("search", TSVECTOR, Computed("to_tsvector('english', text)", persisted=True)),
+    Column("embedding", Vector(EMBEDDING_DIMENSIONS), nullable=False),
 )
 
 Index("ix_chunks_search", chunks_table.c.search, postgresql_using="gin")
+Index(
+    "ix_chunks_embedding",
+    chunks_table.c.embedding,
+    postgresql_using="hnsw",
+    postgresql_ops={"embedding": "vector_cosine_ops"},
+)
 Index(
     "ix_chunks_source_rule",
     chunks_table.c.source_type,

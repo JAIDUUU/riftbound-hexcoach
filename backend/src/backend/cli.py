@@ -104,10 +104,14 @@ def _ingest_rules(args: argparse.Namespace) -> int:
         return 1
 
     from backend.db import make_engine
+    from backend.retrieval.embedding import embedder
+
+    print(f"Embedding {len(chunks)} chunks (bge-small, in-process)\u2026")
+    embeddings = embedder().embed_passages([chunk.text for chunk in chunks])
 
     engine = make_engine()
     with engine.begin() as connection:
-        written = replace_rules(connection, chunks, source_date)
+        written = replace_rules(connection, chunks, source_date, embeddings)
     engine.dispose()
     print(f"Ingested {written} rule chunks from {pdf.name} (rules version {source_date}).")
     return 0
@@ -124,11 +128,19 @@ def format_hit(hit: "SearchHit") -> str:
 
 def _search(args: argparse.Namespace) -> int:
     from backend.db import make_engine
-    from backend.retrieval.repository import search_chunks
+    from backend.retrieval.repository import hybrid_search_chunks, search_chunks
 
+    query = " ".join(args.query)
     engine = make_engine()
     with engine.connect() as connection:
-        hits = search_chunks(connection, " ".join(args.query), limit=args.limit)
+        if args.keyword_only:
+            hits = search_chunks(connection, query, limit=args.limit)
+        else:
+            from backend.retrieval.embedding import embedder
+
+            hits = hybrid_search_chunks(
+                connection, query, embedder().embed_query(query), limit=args.limit
+            )
     engine.dispose()
     if not hits:
         print("No matching chunks.")
@@ -154,7 +166,8 @@ def _eval_retrieval(args: argparse.Namespace) -> int:
     from backend.evals.golden import load_golden_set
     from backend.evals.langfuse_run import langfuse_client, run_experiment, upload_golden_set
     from backend.evals.retrieval_eval import aggregate_hit_rate
-    from backend.retrieval.repository import search_chunks
+    from backend.retrieval.embedding import embedder
+    from backend.retrieval.repository import hybrid_search_chunks
 
     items = load_golden_set(GOLDEN_SET_PATH)
     client = langfuse_client()
@@ -165,7 +178,9 @@ def _eval_retrieval(args: argparse.Namespace) -> int:
     with engine.connect() as connection:
 
         def retrieve(question: str) -> list[str]:
-            hits = search_chunks(connection, question, limit=args.limit)
+            hits = hybrid_search_chunks(
+                connection, question, embedder().embed_query(question), limit=args.limit
+            )
             return [hit.rule_id for hit in hits if hit.rule_id is not None]
 
         results = run_experiment(client, items, retrieve, args.run_name)
@@ -227,9 +242,14 @@ def build_parser() -> argparse.ArgumentParser:
     lookup.add_argument("name", nargs="+", help="Card name, e.g. Sona, Harmonious")
     ingest = add("ingest-rules", _ingest_rules, "Chunk the Core Rules PDF into the database.")
     ingest.add_argument("--pdf", help=f"Rules PDF (default: newest {CORE_RULES_PDF_GLOB})")
-    searcher = add("search", _search, "Full-text search across the ingested chunks.")
+    searcher = add("search", _search, "Hybrid (keyword + vector) search across the chunks.")
     searcher.add_argument("query", nargs="+", help="Search terms, e.g. combat damage order")
     searcher.add_argument("-k", "--limit", type=int, default=10, help="Max hits (default 10)")
+    searcher.add_argument(
+        "--keyword-only",
+        action="store_true",
+        help="Skip the embedding model and use full-text search alone",
+    )
     asker = add("ask", _ask, "Send one prompt through the real provider chain (smoke test).")
     asker.add_argument("prompt", nargs="+", help="The prompt to send")
     add("check-golden", _check_golden, "Validate the golden set file.")

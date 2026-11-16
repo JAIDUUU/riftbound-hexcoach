@@ -61,6 +61,7 @@ def test_clean_cards_are_reported_quietly(
 
 def test_a_search_hit_shows_rule_id_section_origin_and_first_line() -> None:
     hit = SearchHit(
+        chunk_id=1,
         source_type="rules",
         rule_id="054.1",
         section="\u201cCan\u2019t beats Can\u201d",
@@ -68,7 +69,6 @@ def test_a_search_hit_shows_rule_id_section_origin_and_first_line() -> None:
         "Example: not shown in the summary line.",
         source_version="2026-10-09",
         source_date=date(2026, 10, 9),
-        rank=0.42,
     )
 
     assert format_hit(hit) == (

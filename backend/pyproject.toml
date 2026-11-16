@@ -9,11 +9,13 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.14",
+    "fastembed>=0.9.1",
     "langchain>=1.4.9",
     "langchain-google-genai>=4.4.3",
     "langchain-groq>=1.2.0",
     "langchain-openai>=1.8.0",
     "langfuse>=5.2.0",
+    "pgvector>=0.5.1",
     "psycopg[binary]>=3.2",
     "python-dotenv>=1.0",
     "pyyaml>=6.0.3",

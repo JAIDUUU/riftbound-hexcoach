@@ -30,8 +30,8 @@ uv run backend refresh-cards   # fetch Rifthunt bulk data into the committed sna
 uv run backend migrate         # apply Alembic migrations (re-runnable; enables pgvector)
 uv run backend load-cards      # sync the committed snapshot into the cards table
 uv run backend card <name>     # look a card up by oracle name or alias and print its cleaned text
-uv run backend ingest-rules    # chunk the newest Core Rules PDF in data/rules into the database
-uv run backend search <query>  # full-text search across the ingested chunks (-k for more hits)
+uv run backend ingest-rules    # chunk + embed the newest Core Rules PDF in data/rules into the DB
+uv run backend search <query>  # hybrid keyword+vector search across the chunks (-k for more hits)
 uv run backend ask <prompt>    # smoke-test the LLM provider fallback chain with one prompt
 uv run backend check-golden    # validate data/golden/golden-set.yaml
 uv run backend eval-retrieval --run-name <name>  # score retrieval on the golden set via Langfuse
@@ -46,10 +46,22 @@ longer present are deleted. Both commands warn about icon shortcodes the cleaner
 and about names that would look up more than one card.
 
 `ingest-rules` extracts the Core Rules PDF (one chunk per rule number, with its section and
-parent rule as metadata), checks that the numbering came out sequential, and replaces the
-previous rules version in the `chunks` table (ADR 0008: single current version). The rules
-version is the document's own "Last Updated" date. The Tournament Rules PDF in `data/rules/`
-is a separate document (organized-play procedures) and is not ingested.
+parent rule as metadata), checks that the numbering came out sequential, embeds every chunk,
+and replaces the previous rules version in the `chunks` table (ADR 0008: single current
+version). The rules version is the document's own "Last Updated" date. The Tournament Rules
+PDF in `data/rules/` is a separate document (organized-play procedures) and is not ingested.
+
+### Embeddings and hybrid search
+
+Chunks and queries are embedded in-process with bge-small-en-v1.5 via fastembed's ONNX
+runtime — no external embedding API. The ~130 MB model downloads to the local HuggingFace
+cache on first use. `search` runs keyword (FTS) and vector (pgvector cosine) retrieval and
+merges the two rankings with reciprocal rank fusion; `--keyword-only` skips the model.
+
+Memory footprint (matters for hosting): embedding a query costs about **270 MB RSS** for
+the whole Python process with the model loaded. Bulk ingestion peaks around **1.2 GB RSS**
+(batches of 32 passages; fastembed's default batch of 256 peaked near 7 GB) and takes
+roughly two minutes for the ~2,500 rule chunks on CPU.
 
 `eval-retrieval` uploads the golden set (`data/golden/golden-set.yaml`, hand-written rulings
 with the Core Rules ids a correct answer must cite) to the Langfuse dataset `hexcoach-golden`
