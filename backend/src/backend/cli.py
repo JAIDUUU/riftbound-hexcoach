@@ -185,7 +185,7 @@ def _ask(args: argparse.Namespace) -> int:
     for provider in chain.skipped:
         print(f"note: {provider} has no API key and was skipped")
     provider, message = chain.ask(" ".join(args.prompt))
-    print(f"[{provider}] {message.text()}")
+    print(f"[{provider}] {message.text}")
     return 0
 
 

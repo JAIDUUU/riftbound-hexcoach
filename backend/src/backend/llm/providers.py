@@ -19,9 +19,9 @@ from pydantic import SecretStr
 from backend.config import MissingConfigError, optional_env
 
 DEFAULT_PROVIDER_CHAIN = (
-    "gemini:gemini-2.5-flash"
-    ",groq:llama-3.3-70b-versatile"
-    ",openrouter:deepseek/deepseek-chat-v3-0324:free"
+    "gemini:gemini-3.8-flash"
+    ",groq:openai/gpt-oss-120b"
+    ",openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
 )
 
 
@@ -63,22 +63,41 @@ class ProviderChain(Runnable[LanguageModelInput, BaseMessage]):
         return self.ask(input, config)[1]
 
 
+# Retrying within a provider delays the failover that is this module's whole point, so
+# each model gets one retry and a tight timeout; the chain itself is the retry strategy.
+_MAX_RETRIES = 1
+_TIMEOUT_SECONDS = 30
+
+
 def _gemini(model: str, key: str) -> BaseChatModel:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(model=model, api_key=SecretStr(key))
+    return ChatGoogleGenerativeAI(
+        model=model, api_key=SecretStr(key), max_retries=_MAX_RETRIES, timeout=_TIMEOUT_SECONDS
+    )
 
 
 def _groq(model: str, key: str) -> BaseChatModel:
     from langchain_groq import ChatGroq
 
-    return ChatGroq(model=model, api_key=SecretStr(key))
+    return ChatGroq(
+        model=model,
+        api_key=SecretStr(key),
+        max_retries=_MAX_RETRIES,
+        timeout=_TIMEOUT_SECONDS,
+    )
 
 
 def _openrouter(model: str, key: str) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
-    return ChatOpenAI(model=model, api_key=SecretStr(key), base_url="https://openrouter.ai/api/v1")
+    return ChatOpenAI(
+        model=model,
+        api_key=SecretStr(key),
+        base_url="https://openrouter.ai/api/v1",
+        max_retries=_MAX_RETRIES,
+        timeout=_TIMEOUT_SECONDS,
+    )
 
 
 _PROVIDERS = {
