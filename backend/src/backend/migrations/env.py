@@ -1,10 +1,11 @@
 from alembic import context
 from sqlalchemy import create_engine
 
-from backend.cards.schema import metadata
+from backend.cards.schema import metadata as cards_metadata
 from backend.config import database_url
+from backend.retrieval.schema import metadata as retrieval_metadata
 
-target_metadata = metadata
+target_metadata = [cards_metadata, retrieval_metadata]
 
 
 def run_migrations_offline() -> None:

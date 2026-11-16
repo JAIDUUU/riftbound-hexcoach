@@ -9,7 +9,9 @@ Riftbound is a Riot Games trading card game. This project is unofficial fan cont
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.13.
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.13. Ingesting the rules PDF also
+needs Poppler's `pdftotext` (`sudo apt install poppler-utils`); it is only used by the
+manual `ingest-rules` command, never in CI.
 
 ```bash
 cd backend
@@ -28,6 +30,8 @@ uv run backend refresh-cards   # fetch Rifthunt bulk data into the committed sna
 uv run backend migrate         # apply Alembic migrations (re-runnable; enables pgvector)
 uv run backend load-cards      # sync the committed snapshot into the cards table
 uv run backend card <name>     # look a card up by oracle name or alias and print its cleaned text
+uv run backend ingest-rules    # chunk the newest Core Rules PDF in data/rules into the database
+uv run backend search <query>  # full-text search across the ingested chunks (-k for more hits)
 ```
 
 `refresh-cards` rewrites `data/cards/rifthunt-snapshot.json` (one card per line, so diffs stay
@@ -37,6 +41,12 @@ menu. Per Rifthunt's request it is run at most daily. Commit the result.
 `load-cards` makes the `cards` table match the snapshot: every card is upserted and cards no
 longer present are deleted. Both commands warn about icon shortcodes the cleaner doesn't know
 and about names that would look up more than one card.
+
+`ingest-rules` extracts the Core Rules PDF (one chunk per rule number, with its section and
+parent rule as metadata), checks that the numbering came out sequential, and replaces the
+previous rules version in the `chunks` table (ADR 0008: single current version). The rules
+version is the document's own "Last Updated" date. The Tournament Rules PDF in `data/rules/`
+is a separate document (organized-play procedures) and is not ingested.
 
 ## Tests
 

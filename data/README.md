@@ -4,7 +4,7 @@ Committed source content for the coach. Nothing here is fetched at runtime.
 
 | Folder | What lives here |
 | --- | --- |
-| `rules/` | The current official rules document (only one version is kept; version and date in the filename). |
+| `rules/` | The current official Core Rules document (only one version is kept; date in the filename), which is what gets ingested, plus the Tournament Rules for reference. |
 | `FAQs/` | Official Riot post-set FAQs, one Markdown file each, with a header (title, url, date, set). |
 | `cards/` | The Rifthunt card snapshot, with its fetched date, plus the generated static card JSON for the frontend `@` index. |
 | `golden/` | The hand-written golden set of rulings used for evals. |

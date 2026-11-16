@@ -1,0 +1,40 @@
+          Riftbound Core Rules
+                                      Last Updated: 2026-10-09
+
+
+
+
+000. Golden and Silver Rules
+001.     Golden Rule
+
+002.     Card text supersedes rules text. Whenever a card fundamentally contradicts the rules, the card's indication is
+         what is true.
+
+054.     “Can’t beats Can”
+
+054.1.           Cards that forbid actions or effects, as a broad method of determination, supersede cards that allow
+                 or permit that same action or effect.
+
+054.2.           If a card specifies that an action can “only” be performed under certain circumstances, it cannot be
+                 performed under any other circumstances.
+100.         Game Concepts
+101.         Deck Construction
+
+102.         Riftbound is a Trading Card Game where a player must provide their own cards to play against other players.
+
+103.         To play Riftbound, a player must have a Main Deck, a Rune Deck, a Champion Legend, and a number of
+             Battlefields determined by the Mode of Play.
+
+103.1.               Cards in a player's deck may indicate additional choices to be made while building the deck.
+                              Example: A unit reads in part "If [Name] is in your deck, choose 3 different legends in
+                              addition to your starting legend." This decision is made while building the deck.
+
+103.2.               Your deck must abide by your Domain Identity.
+
+103.2.a.                       If a card has a single Domain, then that card is permitted in the Domain Identity
+                               that corresponds to the same Domain.
+
+103.2.b.                       If a card has more than one Domain, then that card is permitted only in a Domain
+                               Identity that contains all of the indicated Domains on that card.
+
+104.         This rule is long enough not to be a heading because it ends with a period.

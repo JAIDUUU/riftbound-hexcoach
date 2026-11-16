@@ -2,6 +2,11 @@
 
 import argparse
 from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.retrieval.repository import SearchHit
 
 from backend.cards.client_index import build_client_index
 from backend.cards.collapse import Card, collapse_printings
@@ -14,7 +19,9 @@ from backend.cards.snapshot import (
     write_json,
     write_snapshot,
 )
-from backend.config import CARDS_DATA_DIR
+from backend.config import CARDS_DATA_DIR, RULES_DATA_DIR
+
+CORE_RULES_PDF_GLOB = "RiftboundCoreRules-*.pdf"
 
 
 def report_data_problems(cards: Sequence[Card]) -> None:
@@ -71,6 +78,66 @@ def format_card(card: Card) -> str:
     return "\n".join(lines)
 
 
+def _latest_core_rules_pdf() -> Path:
+    candidates = sorted(RULES_DATA_DIR.glob(CORE_RULES_PDF_GLOB))
+    if not candidates:
+        raise SystemExit(f"No {CORE_RULES_PDF_GLOB} found in {RULES_DATA_DIR}.")
+    return candidates[-1]  # the date is in the name, so the newest sorts last
+
+
+def _ingest_rules(args: argparse.Namespace) -> int:
+    from backend.retrieval.repository import replace_rules
+    from backend.rules.extract import extract_pdf_text
+    from backend.rules.parse import parse_rules, rules_date, sequence_problems
+
+    pdf = Path(args.pdf) if args.pdf else _latest_core_rules_pdf()
+    text = extract_pdf_text(pdf)
+    source_date = rules_date(text)
+    chunks = parse_rules(text)
+    problems, gaps = sequence_problems(chunks)
+    for gap in gaps:
+        print(f"note: rule numbering jumps {gap} (expected between rule groups)")
+    if problems:
+        for problem in problems:
+            print(f"error: rule numbering breaks at {problem}")
+        print("Extraction looks mangled; nothing was ingested.")
+        return 1
+
+    from backend.db import make_engine
+
+    engine = make_engine()
+    with engine.begin() as connection:
+        written = replace_rules(connection, chunks, source_date)
+    engine.dispose()
+    print(f"Ingested {written} rule chunks from {pdf.name} (rules version {source_date}).")
+    return 0
+
+
+def format_hit(hit: "SearchHit") -> str:
+    first_line = hit.text.split("\n", 1)[0]
+    if len(first_line) > 160:
+        first_line = first_line[:159] + "\u2026"
+    origin = f"{hit.source_type} {hit.source_date.isoformat()}"
+    header = " \u00b7 ".join(part for part in (hit.rule_id, hit.section, origin) if part)
+    return f"{header}\n  {first_line}"
+
+
+def _search(args: argparse.Namespace) -> int:
+    from backend.db import make_engine
+    from backend.retrieval.repository import search_chunks
+
+    engine = make_engine()
+    with engine.connect() as connection:
+        hits = search_chunks(connection, " ".join(args.query), limit=args.limit)
+    engine.dispose()
+    if not hits:
+        print("No matching chunks.")
+        return 1
+    for hit in hits:
+        print(format_hit(hit))
+    return 0
+
+
 def _card(args: argparse.Namespace) -> int:
     from backend.cards.repository import find_by_oracle_name
     from backend.db import make_engine
@@ -107,6 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
     add("load-cards", _load_cards, "Load the committed card snapshot into the database.")
     lookup = add("card", _card, "Look a card up by oracle name.")
     lookup.add_argument("name", nargs="+", help="Card name, e.g. Sona, Harmonious")
+    ingest = add("ingest-rules", _ingest_rules, "Chunk the Core Rules PDF into the database.")
+    ingest.add_argument("--pdf", help=f"Rules PDF (default: newest {CORE_RULES_PDF_GLOB})")
+    searcher = add("search", _search, "Full-text search across the ingested chunks.")
+    searcher.add_argument("query", nargs="+", help="Search terms, e.g. combat damage order")
+    searcher.add_argument("-k", "--limit", type=int, default=10, help="Max hits (default 10)")
     return parser
 
 

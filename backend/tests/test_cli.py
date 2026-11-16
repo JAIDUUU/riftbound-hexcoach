@@ -1,7 +1,10 @@
+from datetime import date
+
 import pytest
 
 from backend.cards.collapse import Card
-from backend.cli import format_card, main, report_data_problems
+from backend.cli import format_card, format_hit, main, report_data_problems
+from backend.retrieval.repository import SearchHit
 
 
 def test_running_without_a_command_prints_usage_and_succeeds(
@@ -54,3 +57,21 @@ def test_clean_cards_are_reported_quietly(
     report_data_problems(list(cards_by_name.values()))
 
     assert capsys.readouterr().out == ""
+
+
+def test_a_search_hit_shows_rule_id_section_origin_and_first_line() -> None:
+    hit = SearchHit(
+        source_type="rules",
+        rule_id="054.1",
+        section="\u201cCan\u2019t beats Can\u201d",
+        text="Cards that forbid actions or effects supersede cards that allow them.\n"
+        "Example: not shown in the summary line.",
+        source_version="2026-10-09",
+        source_date=date(2026, 10, 9),
+        rank=0.42,
+    )
+
+    assert format_hit(hit) == (
+        "054.1 \u00b7 \u201cCan\u2019t beats Can\u201d \u00b7 rules 2026-10-09\n"
+        "  Cards that forbid actions or effects supersede cards that allow them."
+    )

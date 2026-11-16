@@ -19,7 +19,7 @@ Domain terms used across the code and docs. See [Grill Decisions.md](Grill%20Dec
 
 ## Knowledge sources
 
-- **Rules:** the official Riftbound rules document. Only the current version is kept, with its version and date.
+- **Rules:** the official Riftbound **Core Rules** document (the game rules; not the Tournament Rules, which cover organized play). Only the current version is kept, with its version and date.
 - **FAQ:** an official Riot post-set FAQ. The only blog-type source.
 - **Source:** where a chunk comes from: FAQ, card text or rules.
 - **Source precedence:** FAQ > card text > rules when sources disagree. Between two FAQs, the newer wins.
