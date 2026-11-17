@@ -90,7 +90,7 @@ DeleteAccount = Callable[[uuid.UUID], None]
 user owns cascades from it; a user who is already gone is not an error."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class _Collaborators:
     verifier: TokenVerifier
     open_store: OpenStore
@@ -577,16 +577,16 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.collaborators = _Collaborators(
-        verifier,
-        open_store,
-        open_decks,
-        coach,
-        delete_account,
-        scores,
-        ping_database,
-        open_cards,
-        limits or Limits(),
-        quota,
+        verifier=verifier,
+        open_store=open_store,
+        open_decks=open_decks,
+        coach=coach,
+        delete_account=delete_account,
+        scores=scores,
+        ping_database=ping_database,
+        open_cards=open_cards,
+        limits=limits or Limits(),
+        quota=quota,
     )
     # App-wide: the caps are enforced in the store and in import_decklist, so any endpoint
     # that takes a player message or decklist gets a clear 422 rather than a 500.
