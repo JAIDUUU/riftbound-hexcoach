@@ -65,10 +65,12 @@ showing its source type and date:
   the chunks in sync with the cards table; stamped with the snapshot date)
 
 Each ingest command replaces its own source type wholesale, so re-running never
-duplicates. When sources conflict, downstream consumers apply source precedence
-(ADR 0001: FAQ > card text > rules, newer FAQ first) via
-`backend.retrieval.precedence.order_by_precedence`; `search` itself ranks purely by
-relevance.
+duplicates (and `ingest-faqs` refuses the whole batch if any file fails to parse, so a
+regressed file can't silently vanish from the index). When sources conflict, downstream
+consumers apply source precedence (ADR 0001: FAQ > card text > rules) via
+`backend.retrieval.precedence.order_by_precedence`, which keeps relevance order within
+each class; "between two FAQs the newer wins" is a conflict rule the answerer applies
+using the dates on the hits. `search` itself ranks purely by relevance.
 
 ### Embeddings and hybrid search
 

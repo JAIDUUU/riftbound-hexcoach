@@ -28,22 +28,18 @@ def test_faq_beats_card_text_beats_rules() -> None:
     assert [h.source_type for h in ordered] == ["faq", "card_text", "rules"]
 
 
-def test_between_two_faqs_the_newer_wins() -> None:
-    older = hit(1, "faq", date(2025, 10, 16))
-    newer = hit(2, "faq", date(2026, 4, 29))
+def test_relevance_order_is_kept_within_each_class() -> None:
+    # An older FAQ that ranked higher on relevance stays ahead: supersession only
+    # applies to actual conflicts, which the answerer judges using the hits' dates.
+    relevant_old_faq = hit(1, "faq", date(2025, 10, 16))
+    newer_faq = hit(2, "faq", date(2026, 4, 29))
+    first_rule = hit(3, "rules", date(2026, 10, 9))
+    second_rule = hit(4, "rules", date(2026, 10, 9))
+    card = hit(5, "card_text", date(2026, 11, 6))
 
-    assert order_by_precedence([older, newer]) == [newer, older]
+    ordered = order_by_precedence([second_rule, relevant_old_faq, card, first_rule, newer_faq])
 
-
-def test_relevance_order_is_kept_within_card_text_and_rules() -> None:
-    first_rule = hit(1, "rules", date(2026, 10, 9))
-    second_rule = hit(2, "rules", date(2026, 10, 9))
-    first_card = hit(3, "card_text", date(2026, 11, 6))
-    second_card = hit(4, "card_text", date(2026, 11, 6))
-
-    ordered = order_by_precedence([second_rule, first_card, first_rule, second_card])
-
-    assert [h.chunk_id for h in ordered] == [3, 4, 2, 1]
+    assert [h.chunk_id for h in ordered] == [1, 2, 5, 4, 3]
 
 
 def test_unknown_source_types_sort_last() -> None:

@@ -119,6 +119,28 @@ The first refers to the battlefield that she held.
     assert questions[1].text.endswith("The first refers to the battlefield that she held.")
 
 
+def test_a_rhetorical_question_inside_a_marked_answer_does_not_split_it() -> None:
+    document = parse_faq(
+        HEADER
+        + """
+Q: Does Deflect stop this?
+Yes.
+
+But what happens if the opponent pays the cost?
+
+Then the effect resolves normally.
+
+Q: A second question?
+Answer two.
+"""
+    )
+
+    questions = [chunk for chunk in document.chunks if chunk.is_question]
+    assert len(questions) == 2
+    assert "what happens if the opponent pays the cost?" in questions[0].text
+    assert "resolves normally" in questions[0].text
+
+
 def test_a_heading_after_a_blank_line_ends_a_question_block() -> None:
     document = parse_faq(
         HEADER

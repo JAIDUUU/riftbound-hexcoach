@@ -1,11 +1,12 @@
-  ---
-  title: Riftbound Spiritforged FAQ
-  url: <original post URL>
-  date: 1/13/2026
-  set: SFD
-  ---
+---
 
-  Riftbound Spiritforged FAQ
+title: Riftbound Spiritforged FAQ
+url: https://playriftbound.com/en-us/news/rules-and-releases/riftbound-spiritforged-faq/
+date: 1/13/2026
+set: SFD
+---
+
+Riftbound Spiritforged FAQ
 Everything you need to know about Origins and Spiritforged rules clarifications and errata
 Rules and Releases
 1/13/2026
@@ -18,7 +19,7 @@ This document has three sections:
 
     Outstanding Issues from the Origins FAQ, including some errata to Origins and Spiritforged cards
 
-    Functional Errata for a small number of other cards in Spiritforged 
+    Functional Errata for a small number of other cards in Spiritforged
 
     Rules Clarifications about cards whose intended function may not be obvious in the current rules
 
@@ -55,7 +56,6 @@ This was a mistake, and we shouldn't have done this—it has a lot of weird unin
 For those reasons, we're changing these two cards to work the way other spells work and the way we think players want them to work—that is, you pick all the targets up front, the other player can react before any of it resolves, and then each of the units affected take the damage on resolution. You can still choose the same unit or different units for each choice.
 
 Falling Star (revised text)
-	
 
 Deal 3 to a unit.
 
@@ -64,7 +64,6 @@ Deal 3 to a unit.
 (You can choose different units.)
 
 Icathian Rain (revised text)
-	
 
 Deal 2 to a unit.
 
@@ -93,22 +92,18 @@ Q: Origins cards that instruct players to play cards from their deck, like Promi
 Yes! This is mostly a bookkeeping thing—banishing the card ensures that the game has a place to put the card until it’s actually played, and a place to send the card back to if it can’t be played for whatever reason. 99% of the time, these cards work the same with or without this errata, but we need to cover those weird corner cases. This impacts 3 Spiritforged cards, plus 1 Origins card that got past us last time.
 
 Rek’Sai, Swarm Queen (revised text)
-	
 
 When I attack, you may reveal the top 2 cards of your Main Deck. You may banish one, then play it. If it is a unit, you may play it here. Recycle the rest.
 
 Void Burrower (revised text)
-	
 
-When you conquer, you may exhaust me to reveal the top 2 cards of your Main Deck. You may banish one, then play it. Recycle the rest. 
+When you conquer, you may exhaust me to reveal the top 2 cards of your Main Deck. You may banish one, then play it. Recycle the rest.
 
 Void Rush (revised text)
-	
 
-Reveal the top 2 cards of your Main Deck. You may banish one, then play it, reducing its cost by [2]. Draw any you didn't banish. 
+Reveal the top 2 cards of your Main Deck. You may banish one, then play it, reducing its cost by [2]. Draw any you didn't banish.
 
 Reinforce (revised text)
-	
 
 Look at the top 5 cards of your Main Deck. You may banish a unit from among them, then play it, reducing its cost by [5]. Recycle the remaining cards.
 
@@ -119,12 +114,10 @@ Q: Should the reflexive trigger system introduced in the Origins FAQ apply to an
 Yes! This is another one where if you don’t know the finer points of the rules, you’re probably already playing these cards correctly, but the machinery of the rules requires a slightly different wording than we thought. Reflexive triggers, identified by “do this:” language, create new chain items to handle things that need to offer players a chance to react, or just need to happen later than the rest of a spell or ability. This impacts 2 cards in Spiritforged, both of which let you play something and then try to do something to that thing.
 
 Arise! (revised text)
-	
 
-Play a 2 [M] Sand Soldier unit token for each Equipment you control. Then do this: Ready up to two of them. 
+Play a 2 [M] Sand Soldier unit token for each Equipment you control. Then do this: Ready up to two of them.
 
 Rell, Magnetic (revised text)
-	
 
 Tank (I must be assigned combat damage first.)
 
@@ -140,7 +133,6 @@ Q: Should Blood Rush say “this turn” on it?
 It should! Like Convergent Mutation in Origins, the phrase “this turn” was accidentally omitted.
 
 Blood Rush (revised text)
-	
 
 [Action] (Play on your turn or in showdowns.)
 
@@ -155,15 +147,12 @@ Q: Is the first friendly unit on Deathgrip a cost or a target? When do I kill it
 Deathgrip uses a nonstandard wording that we normally avoid, precisely because of these ambiguities. We’re issuing errata to bring it more in line with how other cards and abilities work. This errata establishes that 1) the friendly unit is a target, not a cost; 2) it is chosen along with the other friendly unit and killed as the spell resolves; 3) if you don’t actually kill it for any reason, either because it’s no longer a legal target or because you replaced its death with an effect like Zhonya’s Hourglass, you do not give the second friendly unit any Might. (You do still draw 1; we’ve introduced a paragraph break to make that clear.)
 
 Deathgrip (revised text)
-	
 
 [Reaction] (Play any time, even before spells and abilities resolve.)
 
 Kill a friendly unit. If you do, give +[M] equal to its Might to another friendly unit this turn.
 
 Draw 1.
-
-
 
 Edge of Night
 
@@ -174,7 +163,6 @@ Because unattended gear at battlefields are recalled, Edge of Night does a stran
 But we don’t want any confusion here—the card works exactly the same as it did before. The Hidden rules still require that you choose a unit at the battlefield where you played it from face down. For that reason, we’ve included reminder text in the errata.
 
 Edge of Night (revised text)
-	
 
 [Hidden] (Hide now for [A] to react with later for [0].)
 
@@ -189,13 +177,10 @@ Q: Can Janna’s play effect be used to heal my units without an enemy unit pres
 Triggered abilities in Riftbound can’t be placed on the chain unless all required targets can be chosen. They can resolve and perform part of their text without all targets still being available, but all targets must be available to put them on the chain to begin with. This is weird, and we generally try not to force players to know it. We think 99% of players probably expect that Janna can heal their units without enemies present, so we’re meeting that expectation with a simple “up to,” similar to some “up to” errata for triggered abilities in Origins.
 
 Janna, Savior (revised text)
-	
 
 [Reaction] (Play any time, even before spells and abilities resolve, including to a battlefield you control.)
 
 When you play me, heal your units here, then move up to one enemy unit from here to its base.
-
-
 
 Jax, Unmatched
 
@@ -204,13 +189,10 @@ Q: How does Jax, Unmatched work?
 Jax, Unmatched grants Quick-Draw to Equipment in your hand, which works as far as letting you play them as Reactions… but doesn’t work so well when the Equipment hits the board and the other part of Quick-Draw tries to take effect. We’re fixing that.
 
 Jax, Unmatched (revised text)
-	
 
 [Deflect] (Opponents must pay [A] to choose me with a spell or ability.)
 
 Your Equipment everywhere have [Quick-Draw]. (Each gains [Reaction]. When you play it, attach it to a unit you control.)
-
-
 
 Kato the Arm
 
@@ -219,12 +201,10 @@ Q: Can Kato the Arm give himself his own Might and keywords?
 “Friendly unit” does properly include Kato himself, but that wasn’t the intent behind this card—Kato can’t throw himself, after all. It was a simple goof that Kato made it out the door without the word “another,” and the gameplay is so divergent from the design intent that we’re changing it to fix this error.
 
 Kato the Arm (revised text)
-	
 
 [Deflect] (Opponents must pay [A] to choose me with a spell or ability.)
 
 When I move to a battlefield, give another friendly unit my keywords and +[M] equal to my Might this turn.
-
 
 Q: Does Kato give keywords he’s gained during play? What about Might bonuses from various sources like Equipment?
 
@@ -239,12 +219,10 @@ Riftbound rules and card text use the word “score” in a couple different way
 The “gain points” meaning of score is underdeveloped in the current rules, so in the future we are likely to revisit the rules and/or card wordings for scoring points without scoring battlefields. For now, we’re issuing errata to make Tianna’s function clearer and leaving the rest unchanged.
 
 Tianna Crownguard (revised text)
-	
 
 [Deflect] (Opponents must pay [A] to choose me with a spell or ability.)
 
 While I'm at a battlefield, opponents can't gain points.
-
 
 Q: Does Forgotten Monument work the same as Tianna? Will it receive similar errata?
 
@@ -259,13 +237,10 @@ Q: When and how does Yone trigger? If you conquer a battlefield, is it still ope
 Yone’s current text is a little, well, open to interpretation. A strict reading suggests that he can never trigger at all—once you’ve conquered a battlefield, it’s no longer open—but obviously that’s not the intent. We’re tweaking his text to cue off the control status of the battlefield immediately before conquering it. This means that he works as intended, triggering at the end of a noncombat showdown in which he conquers. It also means that he now triggers in “surprise defense” scenarios, caused when units move around during showdowns and you wind up defending a battlefield you don’t control.
 
 Yone, Blademaster (revised text)
-	
 
 [Weaponmaster] (When you play me, you may [Equip] one of your Equipment to me for [A] less, even if it's already attached.)
 
 When I conquer a battlefield that was uncontrolled, deal damage equal to my Might to an enemy unit in a base.
-
-
 
 Rules Clarifications
 
@@ -293,7 +268,6 @@ Draven’s ability will trigger and resolve before you gain your regular point f
 
 Pickpocket
 
-
 Q: Can Pickpocket kill a Gold token?
 
 Yes, but we see why you’d ask. The rules use a “NULL” system for values that aren’t available, such as the Might of a unit that’s been removed from the board. The unit is gone and the information is missing, so you can’t do any calculations or comparisons with it (not even “is it no more than 1?”).
@@ -302,11 +276,9 @@ That system could reasonably be applied to the costs of tokens, but we feel that
 
 Rumble, Hotheaded
 
-
 Q: Can Rumble, Hotheaded choose a Mech token to recycle? If he does, where does it go?
 
 Yes, he can. This is a minor gap in the rules. Main Deck cards are recycled to the Main Deck and runes are recycled to the Rune deck, but tokens aren’t actually either of those things. We’ll be clarifying in a future rules updates that tokens “inherit” the recycle destination of their type(s), so a token that’s a unit or gear is recycled to your Main Deck just like any other gear. It then vanishes, as tokens do any time they leave the board, but it still counts as “the unit you recycled” and Rumble can check its Might.
-
 
 Svellsongur
 
@@ -317,7 +289,6 @@ No, Svellsongur only copies the text that’s actually printed on the unit. This
 The key word here is actually copy, a system that will be fleshed out in a future rules update. For now, we’ll just tell you that copies of objects or text take on their original traits, without regard to any subsequent alterations.
 
 Svellsongur doesn’t grant the unit additional “copies” of the abilities of other Equipment. So putting 3 Svellsongur on the same unit will give that unit four total instances of its abilities, not eight. (Four should be plenty.)
-
 
 Q: Aphelios, Exalted has an ability that triggers when I attach an Equipment to him and tells me to “choose one that hasn’t been chosen this turn.” If I attach Svellsongur to him, does he have the second copy of his ability in time for both to trigger? And do I have to choose different options?
 
@@ -353,7 +324,6 @@ Q: What about Deflect costs? Aren’t those optional now?
 
 No, Ezreal won’t help with Deflect costs, and Deflect is not optional. Deflect is a mandatory additional cost, meaning you must pay it if you want to finalize a spell or ability that chooses something with Deflect. It’s true that you can choose not to pay Deflect costs for triggered abilities by choosing not to finalize them, but that doesn’t make it an optional cost.
 
-
 Hostile Takeover
 
 Q: If I use Hostile Takeover to take control of my opponent’s only unit at a battlefield, will there be a showdown? Will it be a combat?
@@ -363,7 +333,6 @@ You’ll start a noncombat showdown. (Hostile Takeover’s reminder text is a li
 There’s a gap in the current rules that leaves this situation without an obvious outcome. We plan to address that gap in the next regular rules update. The issue is surprisingly complex, and we’re not 100% sure what the answer will be when we’re done.
 
 In the meantime, though, we believe starting a noncombat showdown is the least disruptive way to handle this scenario. If you need really precise timing: assume that your opponent loses control of the battlefield in the same cleanup that begins the showdown, even though ordinarily control is “frozen” once the battlefield becomes contested.
-
 
 Temporal Portal
 
@@ -377,7 +346,5 @@ Cards with Weaponmaster
 
 Q: The reminder text of Weaponmaster says “You may”, but the Core Rules reads like it is mandatory. Which is it?
 
-Oh, sharp catch. Weaponmaster as a keyword is always meant to be optional. While the rules utilize a language structure that imply a mandatory target, the reminder text is more accurate here. It is always a choice on whether or not to use this play ability. We will clean up that language in the future. 
+Oh, sharp catch. Weaponmaster as a keyword is always meant to be optional. While the rules utilize a language structure that imply a mandatory target, the reminder text is more accurate here. It is always a choice on whether or not to use this play ability. We will clean up that language in the future.
 Related Articles
-
- 

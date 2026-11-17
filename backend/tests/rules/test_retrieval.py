@@ -140,6 +140,12 @@ def test_search_returns_chunks_from_all_three_sources(ingested: Connection) -> N
     assert faq_hit.title == "Riftbound Origins FAQ"
     assert faq_hit.source_url == "https://example.com/origins-faq/"
     assert faq_hit.source_date == date(2025, 10, 16)
+
+    # Hybrid returns all three source types in one list: the rules chunk only via the
+    # vector side (its text shares no keyword with the query), the others via keyword.
+    hybrid = hybrid_search_chunks(ingested, "zorblax", pointing_at(3), limit=10)
+    assert {hit.source_type for hit in hybrid} == {"faq", "card_text", "rules"}
+
     # Re-replacing one source leaves the others alone.
     replace_chunks(ingested, "faq", [faq])
     assert {hit.source_type for hit in search_chunks(ingested, "zorblax")} == {

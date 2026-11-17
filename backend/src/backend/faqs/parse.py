@@ -74,7 +74,20 @@ def _parse_header(lines: list[str]) -> tuple[dict[str, str], int]:
     return fields, end + 1
 
 
-def _header_values(fields: dict[str, str], problems: list[str], warnings: list[str]):
+@dataclass(frozen=True, slots=True)
+class _Header:
+    title: str | None
+    url: str | None
+    date: date | None
+    set_code: str | None
+    problems: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+
+def _header_values(fields: dict[str, str]) -> _Header:
+    problems: list[str] = []
+    warnings: list[str] = []
+
     def usable(name: str) -> str | None:
         value = fields.get(name, "")
         return None if not value or _PLACEHOLDER.search(value) else value
@@ -94,7 +107,7 @@ def _header_values(fields: dict[str, str], problems: list[str], warnings: list[s
         url = match.group("target")
     if url is None:
         warnings.append("url is missing or a placeholder; chunks will carry no source url")
-    return title, url, parsed_date, set_code
+    return _Header(title, url, parsed_date, set_code, tuple(problems), tuple(warnings))
 
 
 def _is_heading(line: str) -> bool:
@@ -132,6 +145,7 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
     prose: list[str] = []  # completed paragraphs outside any Q/A
     paragraph: list[str] = []  # the paragraph currently being accumulated
     question: str | None = None
+    question_is_bare = False  # started by a bare "...?" paragraph rather than Q:/bold
     answer: list[str] = []
 
     def end_paragraph() -> None:
@@ -153,6 +167,7 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
             end_question()
             end_paragraph()
             question = new_question
+            question_is_bare = False
             continue
         if question is not None:
             # A heading ends the Q/A block, but only once there is answer text and the
@@ -161,7 +176,10 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
             if line and _is_heading(line) and any(answer) and after_blank:
                 end_question()
                 section = line
-            elif line.endswith("?") and any(answer) and after_blank:
+            elif question_is_bare and line.endswith("?") and any(answer) and after_blank:
+                # Only bare-style questions split on a bare "...?" paragraph; in files
+                # that mark questions (Q:/bold), such a paragraph is rhetorical and
+                # belongs to the answer.
                 end_question()
                 question = line
             else:
@@ -176,6 +194,7 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
         elif not paragraph and line.endswith("?"):
             # A whole paragraph that is just a question (Vendetta style) starts a Q/A.
             question = line
+            question_is_bare = True
         else:
             paragraph.append(line)
     end_question()
@@ -186,23 +205,22 @@ def _parse_body(lines: list[str]) -> list[FaqChunk]:
 
 def parse_faq(text: str) -> FaqDocument:
     lines = text.splitlines()
-    problems: list[str] = []
-    warnings: list[str] = []
     fields, body_start = _parse_header(lines)
-    title, url, parsed_date, set_code = _header_values(fields, problems, warnings)
+    header = _header_values(fields)
     chunks = _parse_body(lines[body_start:])
+    problems = list(header.problems)
     if not chunks:
         problems.append("no chunks found in the body")
     if problems:
         raise FaqParseError("; ".join(problems))
-    assert title is not None and parsed_date is not None and set_code is not None
+    assert header.title is not None and header.date is not None and header.set_code is not None
     return FaqDocument(
-        title=title,
-        url=url,
-        date=parsed_date,
-        set_code=set_code,
+        title=header.title,
+        url=header.url,
+        date=header.date,
+        set_code=header.set_code,
         chunks=tuple(chunks),
-        warnings=tuple(warnings),
+        warnings=header.warnings,
     )
 
 

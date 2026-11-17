@@ -50,13 +50,8 @@ def _migrate(_: argparse.Namespace) -> int:
     return 0
 
 
-def card_text_chunk(card: Card) -> str:
-    """What gets embedded and searched for a card: its name, type line and cleaned text."""
-    type_line = f"{card.supertype} {card.card_type}" if card.supertype else card.card_type
-    return f"{card.oracle_name} ({type_line})\n{card.cleaned_text}"
-
-
 def _load_cards(_: argparse.Namespace) -> int:
+    from backend.cards.chunk_text import card_text_chunk
     from backend.cards.repository import sync_cards
     from backend.db import make_engine
     from backend.retrieval.embedding import embedder
@@ -98,36 +93,38 @@ def _ingest_faqs(_: argparse.Namespace) -> int:
     if not paths:
         raise SystemExit(f"No FAQ files found in {FAQS_DATA_DIR}.")
     documents: list[FaqDocument] = []
-    failed = False
+    errors: list[str] = []
     for path in paths:
         try:
             document = load_faq(path)
         except FaqParseError as error:
-            print(f"error: {error} \u2014 file skipped, fix its header and re-run")
-            failed = True
+            errors.append(str(error))
             continue
         for warning in document.warnings:
             print(f"warning: {path.name}: {warning}")
         documents.append(document)
-    if not documents:
-        print("No FAQ file could be parsed; nothing was ingested.")
+    if errors:
+        # Ingesting replaces the faq source wholesale, so a file that parsed fine last
+        # time must not silently vanish because it regressed; refuse the whole batch.
+        for error in errors:
+            print(f"error: {error}")
+        print("Nothing was ingested; fix the files above and re-run.")
         return 1
 
-    texts = [chunk.text for document in documents for chunk in document.chunks]
-    print(f"Embedding {len(texts)} FAQ chunks (bge-small, in-process)\u2026")
-    embeddings = iter(embedder().embed_passages(texts))
+    pairs = [(document, chunk) for document in documents for chunk in document.chunks]
+    print(f"Embedding {len(pairs)} FAQ chunks (bge-small, in-process)\u2026")
+    embeddings = embedder().embed_passages([chunk.text for _, chunk in pairs])
     records = [
         ChunkRecord(
             text=chunk.text,
-            embedding=next(embeddings),
+            embedding=embedding,
             source_version=document.set_code,
             source_date=document.date,
             section=chunk.section,
             title=document.title,
             source_url=document.url,
         )
-        for document in documents
-        for chunk in document.chunks
+        for (document, chunk), embedding in zip(pairs, embeddings, strict=True)
     ]
 
     engine = make_engine()
@@ -136,7 +133,7 @@ def _ingest_faqs(_: argparse.Namespace) -> int:
     engine.dispose()
     titles = ", ".join(f"{d.title} ({d.date})" for d in documents)
     print(f"Ingested {written} FAQ chunks from {len(documents)} files: {titles}.")
-    return 1 if failed else 0
+    return 0
 
 
 def format_card(card: Card) -> str:

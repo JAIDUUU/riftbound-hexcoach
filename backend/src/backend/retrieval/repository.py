@@ -11,13 +11,15 @@ re-ingesting never duplicates and never leaves stale chunks behind (ADR 0008 for
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import Connection, delete, insert, text
 
 from backend.retrieval.fusion import fuse_rankings
 from backend.retrieval.schema import chunks_table
 from backend.rules.parse import RuleChunk
+
+SourceType = Literal["rules", "faq", "card_text"]
 
 _COLUMNS = "id, source_type, rule_id, section, text, source_version, source_date, title, source_url"
 
@@ -70,7 +72,9 @@ class SearchHit:
     source_url: str | None
 
 
-def replace_chunks(connection: Connection, source_type: str, records: Sequence[ChunkRecord]) -> int:
+def replace_chunks(
+    connection: Connection, source_type: SourceType, records: Sequence[ChunkRecord]
+) -> int:
     """Make `source_type`'s chunks match `records`; other source types are untouched."""
     if not records:
         raise ValueError(f"Refusing to replace {source_type!r} chunks with nothing.")
