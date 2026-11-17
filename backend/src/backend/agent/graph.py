@@ -12,6 +12,7 @@ per request with the conversation so far.
 import json
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
 from langchain_core.language_models import LanguageModelInput
@@ -61,6 +62,39 @@ Turn = tuple[Role, str]
 
 Outcome = Literal["answered", "abstained"]
 """How a run ended: a judge-style answer, or a clarifying question / honest decline."""
+
+StepName = Literal["prepare", "retrieve", "grade", "answer", "abstain"]
+"""The graph's nodes; a corrective retry shows up as a second `retrieve` and `grade`."""
+
+_SPOKEN_STEPS: frozenset[str] = frozenset({"answer", "abstain"})
+"""The steps whose model output is the reply itself; the others' replies are JSON."""
+
+
+@dataclass(frozen=True, slots=True)
+class Started:
+    """The run is under way; the trace id (None untraced) is known before any step."""
+
+    trace_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """A graph step has begun."""
+
+    name: StepName
+
+
+@dataclass(frozen=True, slots=True)
+class Token:
+    """A piece of the reply as the model streams it. The streamed pieces are a preview:
+    a provider failing mid-reply restarts it on the next one, so only the final state's
+    answer is authoritative."""
+
+    text: str
+
+
+AgentEvent = Started | Step | Token
+OnEvent = Callable[[AgentEvent], None]
 
 
 class AgentState(TypedDict):
@@ -252,8 +286,34 @@ def run_agent(
     history: Sequence[Turn] = (),
     config: RunnableConfig | None = None,
     tools: Sequence[BaseTool] = (),
+    on_event: OnEvent | None = None,
 ) -> AgentState:
-    """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing)."""
+    """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing).
+
+    With `on_event`, the run is streamed: a `Step` as each node begins and `Token`s as
+    the answer (or the clarifying question) is written. Tokens only flow from models that
+    stream, which real chat models do whenever someone is listening.
+    """
     agent = build_agent(llm, retrieve, tools)
     initial = {"question": question, "history": list(history)}
-    return cast(AgentState, agent.invoke(initial, config))
+    if on_event is None:
+        return cast(AgentState, agent.invoke(initial, config))
+
+    final: Any = None
+    # langgraph ships no complete type stubs; the stream's items are untyped tuples.
+    for mode, payload in agent.stream(  # pyright: ignore[reportUnknownVariableType]
+        initial, config, stream_mode=["tasks", "messages", "values"]
+    ):
+        if mode == "tasks" and "input" in payload:  # a task start; its end carries "result"
+            on_event(Step(payload["name"]))
+        elif mode == "messages":
+            chunk, metadata = payload
+            if (
+                metadata.get("langgraph_node") in _SPOKEN_STEPS
+                and isinstance(chunk, AIMessage)
+                and chunk.text
+            ):
+                on_event(Token(chunk.text))
+        elif mode == "values":
+            final = payload
+    return cast(AgentState, final)

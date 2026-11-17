@@ -7,6 +7,7 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable, RunnableConfig
 
+from backend.agent.graph import AgentEvent, Started, Step
 from backend.agent.tracing import hash_user_id, traced_run, tracing_enabled
 from backend.retrieval.repository import SearchHit
 
@@ -67,3 +68,22 @@ def test_an_untraced_run_still_works_and_returns_no_trace_id(no_langfuse_keys: N
     assert trace_id is None
     assert state["outcome"] == "answered"
     assert state["answer"] == "No (rule 472)."
+
+
+def test_an_untraced_streamed_run_announces_its_missing_trace_id_first(
+    no_langfuse_keys: None,
+) -> None:
+    llm = ScriptedLLM(
+        [
+            '{"query": "score twice", "language": "en"}',
+            '{"grade": "weak", "rewritten_query": null}',
+            "Which battlefield?",
+        ]
+    )
+    events: list[AgentEvent] = []
+
+    state, _ = traced_run(llm, lambda query: [], "Can I?", on_event=events.append)
+
+    assert events[0] == Started(trace_id=None)
+    assert Step("prepare") in events[1:]
+    assert state["outcome"] == "abstained"
