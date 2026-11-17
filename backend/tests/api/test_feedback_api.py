@@ -10,7 +10,7 @@ from typing import Literal
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import create_app
+from backend.api.app import OpenStore, create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from tests.api.tokens import fake_verifier, mint
@@ -58,13 +58,17 @@ def langfuse() -> FakeLangfuse:
     return FakeLangfuse()
 
 
-@pytest.fixture
-def client(store: InMemoryConversationStore, langfuse: FakeLangfuse) -> TestClient:
+def _opener(store: InMemoryConversationStore) -> OpenStore:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return TestClient(create_app(fake_verifier(), open_store, scores=langfuse))
+    return open_store
+
+
+@pytest.fixture
+def client(store: InMemoryConversationStore, langfuse: FakeLangfuse) -> TestClient:
+    return TestClient(create_app(fake_verifier(), _opener(store), scores=langfuse))
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -134,6 +138,27 @@ def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
     assert (second["score_id"], second["name"]) == (first["score_id"], first["name"])
     assert second["timestamp"] is not None
     assert second["timestamp"] == first["timestamp"]
+
+
+def test_without_langfuse_the_vote_is_still_stored(store: InMemoryConversationStore) -> None:
+    client = TestClient(create_app(fake_verifier(), _opener(store), scores=None))
+    answer = _answered(store)
+
+    response = _vote(client, answer.conversation_id, answer.message_id, "down")
+
+    assert response.status_code == 200
+    assert _feedback_shown(client, answer.conversation_id) == [None, "down"]
+
+
+def test_feedback_needs_a_token_and_a_thumbs_up_or_down(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    answer = _answered(store)
+    url = f"/conversations/{answer.conversation_id}/messages/{answer.message_id}/feedback"
+
+    assert client.put(url, json={"rating": "up"}).status_code == 401
+    assert _vote(client, answer.conversation_id, answer.message_id, "meh").status_code == 422
+    assert langfuse.scores == []
 
 
 def test_each_answer_gets_its_own_score(
