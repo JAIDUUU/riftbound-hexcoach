@@ -145,6 +145,7 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   conversation store, the boundary every message write and every LLM-bound history read
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
+- Message limits per player (see "Message limits" below) refuse a message with a 429.
 - `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
   records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
   The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
@@ -168,8 +169,9 @@ The API also ships as a container (`backend/Dockerfile`, same environment variab
 message, runs the agent fresh on the conversation so far (the most recent
 `MAX_HISTORY_MESSAGES` messages), and streams the answer as server-sent events
 ([ADR 0005](../docs/adr/0005-sse-streaming-and-final-event.md)). Refusals happen before
-the stream opens, so they are plain HTTP errors: 401 (token), 404 (not your
-conversation), 422 (empty or over the length cap). Once the response is a 200, the events are:
+the stream opens, so they are plain HTTP errors: 401 (token), 429 (a message limit, below),
+404 (not your conversation), 422 (empty or over the length cap). Once the response is a 200,
+the events are:
 
 | Event    | Data                                                  | When                                    |
 | -------- | ----------------------------------------------------- | --------------------------------------- |
@@ -228,6 +230,45 @@ data: {"text":"No - a battlefield scores once per turn (rule 472).","outcome":"a
 seconds (a slow provider) get a `: ping` comment line, which SSE parsers ignore. Browsers can't
 use `EventSource` for a POST, so the frontend reads the stream with `fetch`.
 
+#### Message limits
+
+Each player's messages are limited to keep the free-tier demo alive
+(`backend/quota/admission.py`). The numbers are configuration, and the defaults are
+**unverified** placeholders until the free-tier limits of the providers and Supabase are
+checked:
+
+| Setting                | Default | What it limits                                            |
+| ---------------------- | ------- | --------------------------------------------------------- |
+| `MESSAGES_PER_MINUTE`  | 5       | messages in any sliding 60 seconds, per API process       |
+| `MESSAGES_PER_DAY`     | 50      | messages per UTC calendar day, across all processes       |
+| `MAX_MESSAGE_CHARS`    | 4000    | characters per message (422)                              |
+| `MAX_HISTORY_MESSAGES` | 20      | earlier messages sent to the LLM (older ones are dropped) |
+| `MAX_DECKLIST_CHARS`   | 4000    | characters per decklist (422)                             |
+
+The per-minute throttle is in memory, so it is per process and starts afresh on a restart.
+The daily count is in Postgres (`daily_usage`, migration 0011), one row per player per UTC
+day, so every quota resets at 00:00 UTC. It is counted and checked in one statement, so two
+messages sent at once can't both take the last slot.
+
+What counts: the checks run first on `POST /conversations/{id}/messages`, right after the
+token. A message the throttle lets through counts toward the minute, and one the daily quota
+then lets through counts toward the day, even if it is then refused as a 404 or 422 or its
+run fails (a failed run has usually already spent provider calls). A message refused with a
+429 counts toward neither, and so does a request without a valid token.
+
+Over a limit, the response is a 429 with a `Retry-After` header (whole seconds) and a body
+the frontend can branch on:
+
+```json
+{"detail": "You've used all 50 of today's demo messages. The quota resets at 00:00 UTC.",
+ "code": "daily_quota_reached", "retry_after": 5400}
+```
+
+`code` is `daily_quota_reached` (show "demo quota reached"; `retry_after` runs to the next
+UTC midnight) or `rate_limited` (too many in a minute; usually a few seconds). `retry_after`
+is repeated in the body because a cross-origin `fetch` can't read `Retry-After` unless CORS
+exposes it.
+
 #### Decks
 
 Decks are per account, with the same ownership rules (someone else's deck is a 404):
@@ -241,6 +282,9 @@ Decks are per account, with the same ownership rules (someone else's deck is a 4
   suggestions, plus a list of typed warnings (`malformed_line`, `outside_section`,
   `unknown_section`, `unknown_card`, `section_size`, `copy_limit`). Warnings never block
   saving.
+- A decklist over `MAX_DECKLIST_CHARS` (default 4000, an unverified placeholder) is a 422
+  on preview, create and update, and nothing is saved. Reading a deck saved before the cap
+  was lowered still works.
 
 Decklists are parsed in code (`backend/decks/parse.py`), never by the LLM: one header per
 section (Legend, Champion, MainDeck, Battlefields, Runes, Sideboard) and `<count> <name>`
@@ -248,7 +292,7 @@ lines, where names can contain commas and colons. Only the text is stored. Valid
 recomputed from it on every read, so a card snapshot refresh is picked up. Cards resolve
 through the same oracle-name/alias matcher and alias-aware suggestions as `lookup_card`
 (`backend/cards/catalog.py`). `import_decklist` (`backend/decks/importing.py`) is the one
-entry point for every decklist, so checks on the decklist itself, such as a size cap, go
+entry point for every decklist, so checks on the decklist itself, such as the size cap, go
 there. The structural numbers (`backend/decks/construction.py`) are **unverified**
 placeholders read from the Core and Tournament Rules for constructed play: 1 Legend,
 1 Champion, a 40-card Main Deck counting the Champion, 3 unique Battlefields, 12 Runes, a
