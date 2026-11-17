@@ -46,7 +46,7 @@ from backend.api.auth import (
     TokenVerifier,
     supabase_verifier,
 )
-from backend.api.turn import OpenStore, PreparedTurn, stream_turn
+from backend.api.turn import OpenCards, OpenStore, PreparedTurn, stream_turn
 from backend.cards.catalog import CardCatalog, SqlCardCatalog
 from backend.config import cors_allowed_origins, supabase_url
 from backend.conversations.limits import MAX_TITLE_CHARS, MessageTooLongError, limits_from_env
@@ -90,6 +90,7 @@ class _Collaborators:
     coach: Coach
     scores: ScoreClient | None
     ping_database: PingDatabase | None
+    open_cards: OpenCards | None
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -256,7 +257,9 @@ def post_message(
     turn: Annotated[PreparedTurn, Depends(begin_turn)], request: Request
 ) -> Iterator[ServerSentEvent]:
     collaborators = _collaborators(request)
-    yield from stream_turn(turn, collaborators.coach, collaborators.open_store)
+    yield from stream_turn(
+        turn, collaborators.coach, collaborators.open_store, collaborators.open_cards
+    )
 
 
 @router.put("/{conversation_id}/messages/{message_id}/feedback")
@@ -465,11 +468,13 @@ def create_app(
     coach: Coach,
     scores: ScoreClient | None = None,
     ping_database: PingDatabase | None = None,
+    open_cards: OpenCards | None = None,
     cors_origins: Sequence[str] = (),
 ) -> FastAPI:
     """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored.
 
-    `ping_database` None means there is no database to check (tests of other endpoints).
+    `ping_database` None means there is no database to check, and `open_cards` None means
+    no Card tag ever validates (tests of other endpoints).
     """
     app = FastAPI(title="HexCoach API")
     # The frontend authenticates with a bearer header, never cookies, so no credentials mode.
@@ -480,7 +485,7 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.collaborators = _Collaborators(
-        verifier, open_store, open_decks, coach, scores, ping_database
+        verifier, open_store, open_decks, coach, scores, ping_database, open_cards
     )
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
@@ -511,6 +516,11 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield DeckAccess(SqlDeckStore(connection), SqlCardCatalog(connection))
 
+    @contextmanager
+    def open_cards() -> Generator[CardCatalog]:
+        with engine.connect() as connection:
+            yield SqlCardCatalog(connection)
+
     return create_app(
         supabase_verifier(supabase_url()),
         open_store,
@@ -518,5 +528,6 @@ def production_app() -> FastAPI:
         coach=database_coach(engine, chat_chain()),
         scores=langfuse_scores(),
         ping_database=lambda: ping_database(engine),
+        open_cards=open_cards,
         cors_origins=cors_allowed_origins(),
     )

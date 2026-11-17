@@ -12,12 +12,15 @@ from fastapi.testclient import TestClient
 from backend.agent.coach import Reply
 from backend.agent.graph import AgentEvent, Started, Step, Token, Turn
 from backend.api.app import create_app
+from backend.cards.catalog import CardCatalog
+from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
 from backend.retrieval.repository import SearchHit
 from tests.api.coaches import FakeCoach
 from tests.api.tokens import fake_verifier, mint
+from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import no_decks
 
@@ -70,12 +73,22 @@ def store() -> InMemoryConversationStore:
     return InMemoryConversationStore(Limits())
 
 
-def _client(store: InMemoryConversationStore, coach: FakeCoach) -> TestClient:
+def _client(
+    store: InMemoryConversationStore, coach: FakeCoach, cards: CardCatalog | None = None
+) -> TestClient:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return TestClient(create_app(fake_verifier(), open_store, open_decks=no_decks, coach=coach))
+    @contextmanager
+    def open_cards() -> Generator[CardCatalog]:
+        yield cards if cards is not None else InMemoryCardCatalog([])
+
+    return TestClient(
+        create_app(
+            fake_verifier(), open_store, open_decks=no_decks, coach=coach, open_cards=open_cards
+        )
+    )
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -88,8 +101,9 @@ def _post(
     conversation_id: uuid.UUID,
     body: dict[str, Any],
     headers: dict[str, str],
+    cards: CardCatalog | None = None,
 ):
-    return _client(store, coach).post(
+    return _client(store, coach, cards).post(
         f"/conversations/{conversation_id}/messages", json=body, headers=headers
     )
 
@@ -101,10 +115,11 @@ def _ask(
     *,
     conversation_id: uuid.UUID | None = None,
     user: uuid.UUID = ALICE,
+    cards: CardCatalog | None = None,
 ) -> list[Event]:
     if conversation_id is None:
         conversation_id = store.create(ALICE, None).id
-    response = _post(store, coach, conversation_id, {"content": content}, _as(user))
+    response = _post(store, coach, conversation_id, {"content": content}, _as(user), cards)
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/event-stream")
     return parse_sse(response.text)
@@ -165,6 +180,49 @@ def test_final_cites_only_the_evidence_the_answer_names(
             "text": "A player may only Score once per Battlefield per turn.",
         }
     ]
+
+
+def test_final_carries_each_tagged_card_for_its_preview_and_leaves_unknown_tags_out(
+    store: InMemoryConversationStore, cards_by_name: dict[str, Card]
+) -> None:
+    answer = "No: [[Pouty Poro]] has Deflect, and [[Pouty Poros]] is not a card."
+    coach = FakeCoach([Started(None)], Reply(answer, "answered", ()))
+
+    final = _ask(store, coach, cards=InMemoryCardCatalog(cards_by_name.values()))[-1].data
+
+    assert final["text"] == answer
+    assert final["cards"] == [
+        {
+            "oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185",
+            "oracle_name": "Pouty Poro",
+            "tags": ["Pouty Poro"],
+            "image_url": "https://images.rifthunt.com/cards/normal/front/ogn/013/pouty-poro.webp",
+            "cleaned_text": (
+                "Deflect (Opponents must pay Rainbow Rune to choose me with a spell or ability.)"
+            ),
+        }
+    ]
+
+
+class _UnreachableCatalog:
+    def find(self, name: str) -> Card | None:
+        raise ConnectionError("cards table unreachable")
+
+    def all_names(self) -> list[str]:
+        raise ConnectionError("cards table unreachable")
+
+
+def test_an_unreachable_card_catalog_still_ends_with_final_and_its_tags_as_plain_text(
+    store: InMemoryConversationStore,
+) -> None:
+    answer = "No: [[Pouty Poro]] has Deflect."
+    coach = FakeCoach([Started(None)], Reply(answer, "answered", ()))
+
+    events = _ask(store, coach, cards=_UnreachableCatalog())
+
+    assert events[-1].event == "final"
+    assert events[-1].data["text"] == answer
+    assert events[-1].data["cards"] == []
 
 
 def test_both_messages_are_stored_and_the_answer_keeps_its_announced_id_and_trace(
