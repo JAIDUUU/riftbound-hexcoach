@@ -6,18 +6,17 @@ suggestions (or an explicit "nothing similar") instead of leaving room for the m
 invent card text.
 """
 
-import difflib
 from collections.abc import Callable, Sequence
 
 from langchain_core.tools import BaseTool, tool
+
+from backend.cards.catalog import close_names
 
 FindCard = Callable[[str], str | None]
 """Formatted card text (name, type line, cleaned text) by name or alias, or None."""
 
 AllCardNames = Callable[[], Sequence[str]]
 """Every name a lookup would match (oracle names and aliases), for suggestions."""
-
-_MAX_SUGGESTIONS = 3
 
 
 def make_lookup_card(find_card: FindCard, all_card_names: AllCardNames) -> BaseTool:
@@ -29,14 +28,10 @@ def make_lookup_card(find_card: FindCard, all_card_names: AllCardNames) -> BaseT
         found = find_card(name)
         if found is not None:
             return found
-        by_lower = {card_name.lower(): card_name for card_name in all_card_names()}
-        close = difflib.get_close_matches(
-            name.lower(), list(by_lower), n=_MAX_SUGGESTIONS, cutoff=0.6
-        )
+        close = close_names(name, all_card_names())
         if close:
-            suggestions = ", ".join(by_lower[match] for match in close)
             return (
-                f"No card named {name!r} was found. Close names: {suggestions}. "
+                f"No card named {name!r} was found. Close names: {', '.join(close)}. "
                 "If one of these is the card you meant, call lookup_card again with it."
             )
         return (
