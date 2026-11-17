@@ -60,3 +60,27 @@ def test_a_lowered_limit_applies_to_what_is_already_counted(harness: Harness) ->
 
     assert harness.store.consume(alice, MONDAY, limit=2) is None
     assert harness.store.consume(alice, MONDAY, limit=4) == 4  # the refusal counted nothing
+
+
+def test_releasing_gives_back_one_slot_of_that_day(harness: Harness) -> None:
+    alice = harness.new_user()
+    harness.store.consume(alice, MONDAY, limit=2)
+    harness.store.consume(alice, MONDAY, limit=2)
+    harness.store.consume(alice, TUESDAY, limit=2)
+
+    harness.store.release(alice, MONDAY)
+
+    assert harness.store.consume(alice, MONDAY, limit=2) == 2
+    assert harness.store.consume(alice, MONDAY, limit=2) is None
+    assert harness.store.consume(alice, TUESDAY, limit=2) == 2  # untouched
+
+
+def test_releasing_never_goes_below_zero(harness: Harness) -> None:
+    alice = harness.new_user()
+    harness.store.release(alice, MONDAY)  # nothing counted yet
+    harness.store.consume(alice, MONDAY, limit=1)
+    harness.store.release(alice, MONDAY)
+    harness.store.release(alice, MONDAY)
+
+    assert harness.store.consume(alice, MONDAY, limit=1) == 1
+    assert harness.store.consume(alice, MONDAY, limit=1) is None

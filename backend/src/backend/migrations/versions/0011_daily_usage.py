@@ -2,7 +2,8 @@
 
 The daily message quota (issue #20) counts here, so the count survives restarts and is
 shared by every API process. One row per user per day they sent a message; the key is
-(user_id, day), which is also what the counting upsert conflicts on. Deleting a user
+(user_id, day), which is also what the counting upsert conflicts on. A refunded message
+(its run failed) is subtracted again, so a row can drop back to zero. Deleting a user
 (auth.users) cascades to their rows. Old days are never read again and stay small (one
 row per active user per day); nothing prunes them yet.
 
@@ -36,7 +37,7 @@ def upgrade() -> None:
         ),
         sa.Column("day", sa.Date(), primary_key=True),
         sa.Column("messages", sa.Integer(), nullable=False),
-        sa.CheckConstraint("messages > 0", name="ck_daily_usage_messages_positive"),
+        sa.CheckConstraint("messages >= 0", name="ck_daily_usage_messages_not_negative"),
     )
     op.execute("ALTER TABLE daily_usage ENABLE ROW LEVEL SECURITY")
     op.execute("REVOKE ALL ON daily_usage FROM anon, authenticated")

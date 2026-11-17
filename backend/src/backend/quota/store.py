@@ -9,7 +9,7 @@ import uuid
 from datetime import date
 from typing import Protocol
 
-from sqlalchemy import Connection
+from sqlalchemy import Connection, update
 from sqlalchemy.dialects.postgresql import insert
 
 from backend.quota.schema import daily_usage_table
@@ -19,6 +19,10 @@ class UsageStore(Protocol):
     def consume(self, user_id: uuid.UUID, day: date, limit: int) -> int | None:
         """Count one message against the user's day if fewer than `limit` are counted:
         the new count, or None (and nothing counted) when the day is already full."""
+        ...
+
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        """Give back one message counted on `day` (never below zero)."""
         ...
 
 
@@ -36,3 +40,14 @@ class SqlUsageStore:
             where=daily_usage_table.c.messages < limit,
         ).returning(daily_usage_table.c.messages)
         return self.connection.execute(statement).scalar_one_or_none()
+
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        self.connection.execute(
+            update(daily_usage_table)
+            .where(
+                daily_usage_table.c.user_id == user_id,
+                daily_usage_table.c.day == day,
+                daily_usage_table.c.messages > 0,
+            )
+            .values(messages=daily_usage_table.c.messages - 1)
+        )

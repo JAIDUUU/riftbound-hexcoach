@@ -14,5 +14,5 @@ daily_usage_table = Table(
     Column("user_id", Uuid, primary_key=True),
     Column("day", Date, primary_key=True),  # the UTC calendar day
     Column("messages", Integer, nullable=False),
-    CheckConstraint("messages > 0", name="ck_daily_usage_messages_positive"),
+    CheckConstraint("messages >= 0", name="ck_daily_usage_messages_not_negative"),
 )

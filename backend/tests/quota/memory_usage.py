@@ -24,6 +24,10 @@ class InMemoryUsageStore:
         self.counts[user_id, day] = used + 1
         return used + 1
 
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        if self.counts.get((user_id, day), 0) > 0:
+            self.counts[user_id, day] -= 1
+
 
 def memory_quota(settings: QuotaSettings, clock: Clock) -> MessageQuota:
     """A MessageQuota counting in a fresh InMemoryUsageStore."""
