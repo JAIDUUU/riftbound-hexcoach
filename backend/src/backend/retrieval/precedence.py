@@ -17,10 +17,7 @@ _CLASS_ORDER: dict[SourceType, int] = {"faq": 0, "card_text": 1, "rules": 2}
 def order_by_precedence(hits: Sequence[SearchHit]) -> list[SearchHit]:
     """Stable-sort hits so that authoritative source classes come first.
 
-    FAQ chunks first, then card text, then rules; unknown source types last. The
-    incoming (relevance) order is preserved within each class.
+    FAQ chunks first, then card text, then rules. The incoming (relevance) order is
+    preserved within each class.
     """
-    return sorted(
-        hits,
-        key=lambda hit: _CLASS_ORDER.get(hit.source_type, len(_CLASS_ORDER)),  # type: ignore[arg-type]
-    )
+    return sorted(hits, key=lambda hit: _CLASS_ORDER[hit.source_type])

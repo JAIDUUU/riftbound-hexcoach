@@ -6,7 +6,7 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable, RunnableConfig
 
-from backend.agent.graph import format_evidence, run_agent
+from backend.agent.graph import Turn, format_evidence, run_agent
 from backend.retrieval.repository import SearchHit
 
 
@@ -110,6 +110,19 @@ def test_weak_evidence_twice_abstains_after_exactly_one_retry() -> None:
     assert len(retriever.queries) == 2  # the first attempt plus exactly one retry
 
 
+def test_weak_evidence_without_a_rewritten_query_abstains_instead_of_retrying() -> None:
+    # The spec says the retry happens "with a rewritten query"; if the grader cannot
+    # propose one, re-running the same query would just fetch the same evidence.
+    retriever = RecordingRetriever({})
+    weak_no_rewrite = '{"grade": "weak", "rewritten_query": null}'
+    llm = ScriptedLLM([PREPARE, weak_no_rewrite, "I cannot answer this confidently."])
+
+    state = run_agent(llm, retriever, "Can I?")
+
+    assert state["outcome"] == "abstained"
+    assert len(retriever.queries) == 1
+
+
 def test_non_english_questions_retrieve_in_english_and_answer_in_the_users_language() -> None:
     prepare_pt = '{"query": "Imperial Decree damage assignment", "language": "pt"}'
     retriever = RecordingRetriever(
@@ -129,7 +142,7 @@ def test_message_history_reaches_the_prompts() -> None:
         {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
     )
     llm = ScriptedLLM([PREPARE, STRONG, "As said, rule 472."])
-    history = [("user", "I play a Rengar banish deck."), ("assistant", "Noted.")]
+    history: list[Turn] = [("user", "I play a Rengar banish deck."), ("assistant", "Noted.")]
 
     run_agent(llm, retriever, "So can I re-score it?", history=history)
 
@@ -159,9 +172,21 @@ def test_evidence_is_formatted_by_precedence_and_cited_by_name() -> None:
     assert format_evidence([]) == "(no evidence retrieved)"
 
 
-def test_a_non_json_llm_reply_is_a_clear_error() -> None:
+def test_a_malformed_json_reply_is_reasked_once() -> None:
+    retriever = RecordingRetriever(
+        {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
+    )
+    llm = ScriptedLLM(["Let me ponder this at length.", PREPARE, STRONG, "No (rule 472)."])
+
+    state = run_agent(llm, retriever, "Can I?")
+
+    assert state["outcome"] == "answered"
+    assert "not valid JSON" in llm.prompts[1]  # the re-ask names the problem
+
+
+def test_two_non_json_replies_are_a_clear_error() -> None:
     retriever = RecordingRetriever({})
-    llm = ScriptedLLM(["I shall now ponder your question at length."])
+    llm = ScriptedLLM(["I shall now ponder.", "Still pondering, no JSON in sight."])
 
     with pytest.raises(ValueError, match="Expected a JSON reply"):
         run_agent(llm, retriever, "Can I?")

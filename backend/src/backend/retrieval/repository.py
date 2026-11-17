@@ -11,7 +11,7 @@ re-ingesting never duplicates and never leaves stale chunks behind (ADR 0008 for
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from sqlalchemy import Connection, delete, insert, text
 
@@ -62,7 +62,7 @@ class ChunkRecord:
 @dataclass(frozen=True, slots=True)
 class SearchHit:
     chunk_id: int
-    source_type: str
+    source_type: SourceType
     rule_id: str | None
     section: str | None
     text: str
@@ -133,7 +133,9 @@ def _hits(connection: Connection, statement: Any, params: dict[str, object]) -> 
     return [
         SearchHit(
             chunk_id=row["id"],
-            source_type=row["source_type"],
+            # Only replace_chunks writes this column and it takes a SourceType, so the
+            # cast is sound: the closed vocabulary is enforced at the write boundary.
+            source_type=cast(SourceType, row["source_type"]),
             rule_id=row["rule_id"],
             section=row["section"],
             text=row["text"],

@@ -31,6 +31,10 @@ MAX_RETRIEVALS = 2  # the first attempt plus exactly one corrective retry
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
+Role = Literal["user", "assistant"]
+Turn = tuple[Role, str]
+"""One conversation turn, oldest first in a history."""
+
 
 class AgentState(TypedDict):
     """The full state. Keys are filled in graph order; LangGraph merges partial updates,
@@ -38,12 +42,13 @@ class AgentState(TypedDict):
     happens after the producing node has run."""
 
     question: str
-    history: list[tuple[str, str]]  # (role, content) pairs, oldest first
+    history: list[Turn]
     language: str
     query: str
     hits: list[SearchHit]
     retrievals: int
     grade: Literal["strong", "weak"]
+    rewritten: bool  # did the grader supply a different query for the retry?
     answer: str
     outcome: Literal["answered", "abstained"]
 
@@ -51,12 +56,35 @@ class AgentState(TypedDict):
 _Update = dict[str, Any]
 
 
-def _json_reply(message: BaseMessage) -> dict[str, Any]:
+def _parse_json(message: BaseMessage) -> dict[str, Any]:
     """The JSON object in an LLM reply, tolerating code fences and prose around it."""
     match = _JSON_BLOCK.search(message.text)
     if match is None:
         raise ValueError(f"Expected a JSON reply, got: {message.text!r}")
     return cast(dict[str, Any], json.loads(match.group()))
+
+
+def _json_call(llm: ChatModel, system: str, user: str) -> dict[str, Any]:
+    """Ask for JSON; on a malformed reply, re-ask once before giving up.
+
+    One flaky completion should not kill the whole run, but silently looping on a model
+    that can't produce JSON would; two strikes and the error propagates.
+    """
+    first = llm.invoke([("system", system), ("user", user)])
+    try:
+        return _parse_json(first)
+    except ValueError:
+        retry = llm.invoke(
+            [
+                ("system", system),
+                (
+                    "user",
+                    f"{user}\n\nYour previous reply was not valid JSON. Reply with"
+                    " the JSON object only, no prose.",
+                ),
+            ]
+        )
+        return _parse_json(retry)
 
 
 def format_evidence(hits: Sequence[SearchHit]) -> str:
@@ -82,9 +110,7 @@ def build_agent(llm: ChatModel, retrieve: Retriever) -> Any:
     """The compiled graph. Invoke with {"question": ..., "history": [...]}."""
 
     def prepare(state: AgentState) -> _Update:
-        reply = _json_reply(
-            llm.invoke([("system", PREPARE_PROMPT), ("user", _conversation(state))])
-        )
+        reply = _json_call(llm, PREPARE_PROMPT, _conversation(state))
         return {
             "query": str(reply["query"]),
             "language": str(reply.get("language") or "en"),
@@ -99,37 +125,38 @@ def build_agent(llm: ChatModel, retrieve: Retriever) -> Any:
 
     def grade(state: AgentState) -> _Update:
         prompt = f"Question:\n{_conversation(state)}\n\nEvidence:\n{format_evidence(state['hits'])}"
-        reply = _json_reply(llm.invoke([("system", GRADE_PROMPT), ("user", prompt)]))
-        update: _Update = {"grade": "strong" if reply.get("grade") == "strong" else "weak"}
+        reply = _json_call(llm, GRADE_PROMPT, prompt)
+        update: _Update = {
+            "grade": "strong" if reply.get("grade") == "strong" else "weak",
+            "rewritten": False,
+        }
         rewritten = reply.get("rewritten_query")
-        if update["grade"] == "weak" and rewritten:
+        if update["grade"] == "weak" and rewritten and str(rewritten) != state["query"]:
             update["query"] = str(rewritten)
+            update["rewritten"] = True
         return update
 
     def route(state: AgentState) -> str:
         if state["grade"] == "strong":
             return "answer"
-        if state["retrievals"] < MAX_RETRIEVALS:
-            return "retrieve"  # the one corrective retry
+        if state["retrievals"] < MAX_RETRIEVALS and state["rewritten"]:
+            return "retrieve"  # the one corrective retry, and only with a rewritten query
         return "abstain"
 
-    def answer(state: AgentState) -> _Update:
+    def respond(state: AgentState, system_template: str, evidence_label: str) -> str:
         prompt = (
             f"Message history and question:\n{_conversation(state)}\n\n"
-            f"Evidence:\n{format_evidence(state['hits'])}"
+            f"{evidence_label}:\n{format_evidence(state['hits'])}"
         )
-        system = ANSWER_PROMPT.format(language=state["language"])
-        reply = llm.invoke([("system", system), ("user", prompt)])
-        return {"answer": reply.text, "outcome": "answered"}
+        system = system_template.format(language=state["language"])
+        return llm.invoke([("system", system), ("user", prompt)]).text
+
+    def answer(state: AgentState) -> _Update:
+        return {"answer": respond(state, ANSWER_PROMPT, "Evidence"), "outcome": "answered"}
 
     def abstain(state: AgentState) -> _Update:
-        prompt = (
-            f"Message history and question:\n{_conversation(state)}\n\n"
-            f"Evidence that was found (insufficient):\n{format_evidence(state['hits'])}"
-        )
-        system = ABSTAIN_PROMPT.format(language=state["language"])
-        reply = llm.invoke([("system", system), ("user", prompt)])
-        return {"answer": reply.text, "outcome": "abstained"}
+        text = respond(state, ABSTAIN_PROMPT, "Evidence that was found (insufficient)")
+        return {"answer": text, "outcome": "abstained"}
 
     # langgraph ships no complete type stubs; add_node/compile are partially unknown.
     builder = StateGraph(AgentState)
@@ -153,7 +180,7 @@ def run_agent(
     llm: ChatModel,
     retrieve: Retriever,
     question: str,
-    history: Sequence[tuple[str, str]] = (),
+    history: Sequence[Turn] = (),
 ) -> AgentState:
     agent = build_agent(llm, retrieve)
     initial = {"question": question, "history": list(history)}

@@ -1,10 +1,10 @@
 from datetime import date
 
 from backend.retrieval.precedence import order_by_precedence
-from backend.retrieval.repository import SearchHit
+from backend.retrieval.repository import SearchHit, SourceType
 
 
-def hit(chunk_id: int, source_type: str, source_date: date) -> SearchHit:
+def hit(chunk_id: int, source_type: SourceType, source_date: date) -> SearchHit:
     return SearchHit(
         chunk_id=chunk_id,
         source_type=source_type,
@@ -40,10 +40,3 @@ def test_relevance_order_is_kept_within_each_class() -> None:
     ordered = order_by_precedence([second_rule, relevant_old_faq, card, first_rule, newer_faq])
 
     assert [h.chunk_id for h in ordered] == [1, 2, 5, 4, 3]
-
-
-def test_unknown_source_types_sort_last() -> None:
-    mystery = hit(1, "forum_post", date(2026, 1, 1))
-    rules = hit(2, "rules", date(2026, 10, 9))
-
-    assert order_by_precedence([mystery, rules]) == [rules, mystery]
