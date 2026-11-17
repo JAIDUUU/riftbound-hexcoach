@@ -1,7 +1,7 @@
 import json
 import uuid
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
@@ -10,8 +10,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.agent.coach import Reply
-from backend.agent.graph import AgentEvent, Started, Step, Token, Turn
-from backend.api.app import create_app
+from backend.agent.graph import (
+    AgentEvent,
+    MentionedCard,
+    MentionedDeck,
+    Started,
+    Step,
+    Token,
+    Turn,
+)
+from backend.api.app import DeckAccess, OpenDecks, create_app
+from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
@@ -19,8 +28,9 @@ from backend.retrieval.repository import SearchHit
 from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import FakeCoach
 from tests.api.tokens import fake_verifier, mint
+from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
+from tests.decks.memory_store import InMemoryDeckStore, no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -71,7 +81,12 @@ def store() -> InMemoryConversationStore:
     return InMemoryConversationStore(Limits())
 
 
-def _client(store: InMemoryConversationStore, coach: FakeCoach) -> TestClient:
+def _client(
+    store: InMemoryConversationStore,
+    coach: FakeCoach,
+    open_decks: OpenDecks = no_decks,
+    limits: Limits | None = None,
+) -> TestClient:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
@@ -80,9 +95,10 @@ def _client(store: InMemoryConversationStore, coach: FakeCoach) -> TestClient:
         create_app(
             fake_verifier(),
             open_store,
-            open_decks=no_decks,
+            open_decks=open_decks,
             coach=coach,
             delete_account=unused_account_deletion,
+            limits=limits,
         )
     )
 
@@ -312,3 +328,180 @@ def test_a_conversation_deleted_mid_answer_ends_with_an_error_not_a_final(
 
     assert events[-1].event == "error"
     assert events[-1].data["code"] == "conversation_deleted"
+
+
+SONA_ID = "f30de1e6-73f9-4b64-9211-791d0fc422e7"  # its `id` in data/cards/card-index.json
+SONA_DECK = "Champion:\n1 Sona, Harmonious\nMainDeck:\n3 Blazing Scorcher\n"
+
+
+@dataclass
+class Library:
+    """The decks and cards a test's messages can mention."""
+
+    decks: InMemoryDeckStore
+    cards: InMemoryCardCatalog
+
+    def open(self) -> AbstractContextManager[DeckAccess]:
+        return nullcontext(DeckAccess(self.decks, self.cards))
+
+
+@pytest.fixture
+def library(cards_by_name: dict[str, Card]) -> Library:
+    return Library(InMemoryDeckStore(), InMemoryCardCatalog(cards_by_name.values()))
+
+
+def _mention(
+    store: InMemoryConversationStore,
+    coach: FakeCoach,
+    library: Library,
+    mentions: list[dict[str, str]],
+    *,
+    user: uuid.UUID = ALICE,
+    conversation_id: uuid.UUID | None = None,
+    limits: Limits | None = None,
+):
+    if conversation_id is None:
+        conversation_id = store.create(ALICE, None).id
+    return _client(store, coach, library.open, limits).post(
+        f"/conversations/{conversation_id}/messages",
+        json={"content": "Does she ready runes?", "mentions": mentions},
+        headers=_as(user),
+    )
+
+
+def test_mentioned_cards_and_decks_reach_the_coach_resolved(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    deck = library.decks.create(ALICE, "Sona ramp", SONA_DECK)
+    coach = FakeCoach([Started(None)], Reply("Yes.", "answered", ()))
+
+    response = _mention(
+        store,
+        coach,
+        library,
+        [{"kind": "card", "id": SONA_ID}, {"kind": "deck", "id": str(deck.id)}],
+    )
+
+    assert response.status_code == 200, response.text
+    [question] = coach.questions
+    card, mentioned_deck = question.mentions
+    assert isinstance(card, MentionedCard) and card.name == "Sona, Harmonious"
+    assert "ready up to 4 friendly runes" in card.text
+    assert mentioned_deck == MentionedDeck(
+        name="Sona ramp",
+        sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher",))),
+    )
+
+
+def test_a_message_without_mentions_resolves_none_and_needs_no_decks(
+    store: InMemoryConversationStore,
+) -> None:
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    _ask(store, coach)
+
+    assert coach.questions[0].mentions == ()
+
+
+@pytest.mark.parametrize("kind", ["card", "deck"])
+def test_an_unknown_mention_is_a_plain_422_and_nothing_is_stored_or_run(
+    store: InMemoryConversationStore, library: Library, kind: str
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+    unknown = str(uuid.uuid4())
+
+    response = _mention(
+        store, coach, library, [{"kind": kind, "id": unknown}], conversation_id=conversation.id
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": f"No {kind} with id {unknown}."}
+    assert coach.questions == []
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None and detail.messages == ()
+
+
+def test_someone_elses_deck_is_refused_like_a_missing_one(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    bobs = library.decks.create(BOB, "Bob's deck", SONA_DECK)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _mention(store, coach, library, [{"kind": "deck", "id": str(bobs.id)}])
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": f"No deck with id {bobs.id}."}
+    assert coach.questions == []
+
+
+def test_someone_elses_conversation_is_still_a_404_whatever_it_mentions(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _mention(
+        store,
+        coach,
+        library,
+        [{"kind": "card", "id": SONA_ID}],
+        user=BOB,
+        conversation_id=conversation.id,
+    )
+
+    assert response.status_code == 404
+
+
+def test_more_mentions_than_the_cap_is_a_plain_422(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _mention(
+        store,
+        coach,
+        library,
+        [{"kind": "card", "id": SONA_ID}] * 3,
+        conversation_id=conversation.id,
+        limits=Limits(max_mentions=2),
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Message has 3 mentions; the limit is 2."}
+    assert coach.questions == []
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None and detail.messages == ()
+
+
+@pytest.mark.parametrize(
+    "mention", [{"kind": "rule", "id": SONA_ID}, {"kind": "card", "id": "Sona, Harmonious"}]
+)
+def test_a_malformed_mention_is_refused(
+    store: InMemoryConversationStore, library: Library, mention: dict[str, str]
+) -> None:
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _mention(store, coach, library, [mention])
+
+    assert response.status_code == 422
+    assert coach.questions == []
+
+
+def test_a_turn_after_a_mentioning_one_sees_its_text_but_not_its_mentions(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None)
+    first = FakeCoach([Started(None)], Reply("Yes.", "answered", ()))
+    _mention(
+        store, first, library, [{"kind": "card", "id": SONA_ID}], conversation_id=conversation.id
+    )
+    second = FakeCoach([Started(None)], Reply("Still yes.", "answered", ()))
+
+    events = _ask(store, second, "And on her first turn?", conversation_id=conversation.id)
+
+    assert events[-1].event == "final"
+    [question] = second.questions
+    assert question.history == (("user", "Does she ready runes?"), ("assistant", "Yes."))
+    assert question.mentions == ()

@@ -3,9 +3,11 @@ import pytest
 from backend.config import InvalidConfigError
 from backend.conversations.limits import (
     DEFAULT_MAX_HISTORY_MESSAGES,
+    DEFAULT_MAX_MENTIONS,
     DEFAULT_MAX_MESSAGE_CHARS,
     Limits,
     MessageTooLongError,
+    TooManyMentionsError,
     limits_from_env,
 )
 
@@ -34,6 +36,16 @@ def test_caps_come_from_the_environment_with_defaults(monkeypatch: pytest.Monkey
         max_message_chars=DEFAULT_MAX_MESSAGE_CHARS, max_history_messages=6
     )
     assert DEFAULT_MAX_HISTORY_MESSAGES != 6  # the override really overrode something
+
+
+def test_mentions_up_to_the_cap_pass_and_more_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_MENTIONS", "3")
+    limits = limits_from_env()
+
+    limits.check_mentions(3)
+    with pytest.raises(TooManyMentionsError, match="4 mentions; the limit is 3"):
+        limits.check_mentions(4)
+    assert DEFAULT_MAX_MENTIONS != 3
 
 
 @pytest.mark.parametrize(

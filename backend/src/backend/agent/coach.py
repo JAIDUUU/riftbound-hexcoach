@@ -14,7 +14,7 @@ from typing import Protocol
 from langchain_core.tools import BaseTool
 from sqlalchemy import Connection, Engine
 
-from backend.agent.graph import ChatModel, OnEvent, Outcome, Turn
+from backend.agent.graph import ChatModel, Mentioned, OnEvent, Outcome, Turn
 from backend.agent.tracing import traced_run
 from backend.retrieval.repository import SearchHit
 
@@ -30,6 +30,7 @@ class Question:
     history: tuple[Turn, ...]  # oldest first, already capped; excludes `text`
     user_id: uuid.UUID
     conversation_id: uuid.UUID
+    mentions: tuple[Mentioned, ...] = ()  # already resolved; see backend.mentions
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +80,7 @@ def database_coach(engine: Engine, llm: ChatModel) -> Coach:
                 conversation_id=str(question.conversation_id),
                 tools=[card_lookup_tool(connection)],
                 on_event=on_event,
+                mentions=question.mentions,
             )
         return Reply(state["answer"], state["outcome"], tuple(state["hits"]))
 

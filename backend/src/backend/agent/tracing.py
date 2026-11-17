@@ -19,6 +19,7 @@ from langchain_core.tools import BaseTool
 from backend.agent.graph import (
     AgentState,
     ChatModel,
+    Mentioned,
     OnEvent,
     Retriever,
     Started,
@@ -69,6 +70,7 @@ def traced_run(
     conversation_id: str | None = None,
     tools: Sequence[BaseTool] = (),
     on_event: OnEvent | None = None,
+    mentions: Sequence[Mentioned] = (),
 ) -> tuple[AgentState, str | None]:
     """Run the agent; return its final state and the Langfuse trace id (None untraced).
 
@@ -78,7 +80,10 @@ def traced_run(
     if not tracing_enabled():
         if on_event is not None:
             on_event(Started(trace_id=None))
-        return run_agent(llm, retrieve, question, history, tools=tools, on_event=on_event), None
+        state = run_agent(
+            llm, retrieve, question, history, tools=tools, on_event=on_event, mentions=mentions
+        )
+        return state, None
 
     from langfuse import get_client, propagate_attributes
 
@@ -91,7 +96,11 @@ def traced_run(
         langfuse.start_as_current_observation(
             name="ask",
             as_type="agent",
-            input={"question": question, "history_turns": len(history)},
+            input={
+                "question": question,
+                "history_turns": len(history),
+                "mentions": [mention.name for mention in mentions],
+            },
         ) as span,
     ):
         trace_id = langfuse.get_current_trace_id()
@@ -105,6 +114,7 @@ def traced_run(
             config=_langfuse_callbacks(),
             tools=tools,
             on_event=on_event,
+            mentions=mentions,
         )
         span.update(output={"outcome": state["outcome"], "answer": state["answer"]})
     langfuse.flush()

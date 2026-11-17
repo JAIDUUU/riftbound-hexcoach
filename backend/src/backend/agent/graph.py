@@ -33,6 +33,7 @@ from backend.agent.prompts import (
     ANSWER_PROMPT,
     GRADE_PROMPT,
     GRADE_TOOLS_NOTE,
+    MENTIONS_NOTE,
     PREPARE_PROMPT,
     TOOLS_NOTE,
 )
@@ -97,6 +98,26 @@ AgentEvent = Started | Step | Token
 OnEvent = Callable[[AgentEvent], None]
 
 
+@dataclass(frozen=True, slots=True)
+class MentionedCard:
+    """A Card the player @-mentioned, with its full text."""
+
+    name: str
+    text: str  # name, type line and cleaned text, as lookup_card returns them
+
+
+@dataclass(frozen=True, slots=True)
+class MentionedDeck:
+    """A Deck the player @-mentioned, as card names only: no counts and no card text."""
+
+    name: str
+    sections: tuple[tuple[str, tuple[str, ...]], ...]  # (section, oracle names), in order
+
+
+Mentioned = MentionedCard | MentionedDeck
+"""What one @ mention puts into the turn's context (resolved by backend.mentions)."""
+
+
 class AgentState(TypedDict):
     """The full state. Keys are filled in graph order; LangGraph merges partial updates,
     so nodes return plain dicts and the graph's structure guarantees every read below
@@ -104,6 +125,7 @@ class AgentState(TypedDict):
 
     question: str
     history: list[Turn]
+    mentions: list[Mentioned]  # what the player @-mentioned in `question`
     language: str
     query: str
     hits: list[SearchHit]
@@ -162,9 +184,25 @@ def format_evidence(hits: Sequence[SearchHit]) -> str:
     return "\n\n".join(lines) if lines else "(no evidence retrieved)"
 
 
+def format_mentions(mentions: Sequence[Mentioned]) -> str:
+    blocks = [MENTIONS_NOTE]
+    for mention in mentions:
+        match mention:
+            case MentionedCard(name=name, text=text):
+                blocks.append(f"[Card: {name}]\n{text}")
+            case MentionedDeck(name=name, sections=sections):
+                # Card names contain commas ("Sona, Harmonious"), so they're joined with "; ".
+                lines = [f"{section}: {'; '.join(names)}" for section, names in sections]
+                blocks.append("\n".join([f"[Deck: {name}]", *lines]))
+    return "\n\n".join(blocks)
+
+
 def _conversation(state: AgentState) -> str:
+    """The conversation so far, then whatever the latest question @-mentions."""
     turns = [*state.get("history", []), ("user", state["question"])]
-    return "\n".join(f"{role}: {content}" for role, content in turns)
+    conversation = "\n".join(f"{role}: {content}" for role, content in turns)
+    mentions = state.get("mentions", [])
+    return f"{conversation}\n\n{format_mentions(mentions)}" if mentions else conversation
 
 
 def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] = ()) -> Any:
@@ -287,6 +325,7 @@ def run_agent(
     config: RunnableConfig | None = None,
     tools: Sequence[BaseTool] = (),
     on_event: OnEvent | None = None,
+    mentions: Sequence[Mentioned] = (),
 ) -> AgentState:
     """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing).
 
@@ -295,7 +334,7 @@ def run_agent(
     stream, which real chat models do whenever someone is listening.
     """
     agent = build_agent(llm, retrieve, tools)
-    initial = {"question": question, "history": list(history)}
+    initial = {"question": question, "history": list(history), "mentions": list(mentions)}
     if on_event is None:
         return cast(AgentState, agent.invoke(initial, config))
 
