@@ -20,6 +20,7 @@ from backend.agent.graph import (
     Turn,
 )
 from backend.api.app import DeckAccess, OpenDecks, create_app
+from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
@@ -84,12 +85,18 @@ def store() -> InMemoryConversationStore:
 def _client(
     store: InMemoryConversationStore,
     coach: FakeCoach,
+    *,
     open_decks: OpenDecks = no_decks,
     limits: Limits | None = None,
+    cards: CardCatalog | None = None,
 ) -> TestClient:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
+
+    @contextmanager
+    def open_cards() -> Generator[CardCatalog]:
+        yield cards if cards is not None else InMemoryCardCatalog([])
 
     return TestClient(
         create_app(
@@ -98,6 +105,7 @@ def _client(
             open_decks=open_decks,
             coach=coach,
             delete_account=unused_account_deletion,
+            open_cards=open_cards,
             limits=limits,
         )
     )
@@ -113,8 +121,9 @@ def _post(
     conversation_id: uuid.UUID,
     body: dict[str, Any],
     headers: dict[str, str],
+    cards: CardCatalog | None = None,
 ):
-    return _client(store, coach).post(
+    return _client(store, coach, cards=cards).post(
         f"/conversations/{conversation_id}/messages", json=body, headers=headers
     )
 
@@ -126,10 +135,11 @@ def _ask(
     *,
     conversation_id: uuid.UUID | None = None,
     user: uuid.UUID = ALICE,
+    cards: CardCatalog | None = None,
 ) -> list[Event]:
     if conversation_id is None:
         conversation_id = store.create(ALICE, None).id
-    response = _post(store, coach, conversation_id, {"content": content}, _as(user))
+    response = _post(store, coach, conversation_id, {"content": content}, _as(user), cards)
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/event-stream")
     return parse_sse(response.text)
@@ -190,6 +200,52 @@ def test_final_cites_only_the_evidence_the_answer_names(
             "text": "A player may only Score once per Battlefield per turn.",
         }
     ]
+
+
+def test_final_carries_each_tagged_card_for_its_preview_and_leaves_unknown_tags_out(
+    store: InMemoryConversationStore, cards_by_name: dict[str, Card]
+) -> None:
+    answer = "No: [[Pouty Poro]] has Deflect, and [[Pouty Poros]] is not a card."
+    coach = FakeCoach([Started(None)], Reply(answer, "answered", ()))
+
+    final = _ask(store, coach, cards=InMemoryCardCatalog(cards_by_name.values()))[-1].data
+
+    assert final["text"] == answer
+    assert final["cards"] == [
+        {
+            "oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185",
+            "oracle_name": "Pouty Poro",
+            "tags": ["Pouty Poro"],
+            "image_url": "https://images.rifthunt.com/cards/normal/front/ogn/013/pouty-poro.webp",
+            "cleaned_text": (
+                "Deflect (Opponents must pay Rainbow Rune to choose me with a spell or ability.)"
+            ),
+        }
+    ]
+
+
+class _UnreachableCatalog:
+    def find(self, name: str) -> Card | None:
+        raise ConnectionError("cards table unreachable")
+
+    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+        raise ConnectionError("cards table unreachable")
+
+    def all_names(self) -> list[str]:
+        raise ConnectionError("cards table unreachable")
+
+
+def test_an_unreachable_card_catalog_still_ends_with_final_and_its_tags_as_plain_text(
+    store: InMemoryConversationStore,
+) -> None:
+    answer = "No: [[Pouty Poro]] has Deflect."
+    coach = FakeCoach([Started(None)], Reply(answer, "answered", ()))
+
+    events = _ask(store, coach, cards=_UnreachableCatalog())
+
+    assert events[-1].event == "final"
+    assert events[-1].data["text"] == answer
+    assert events[-1].data["cards"] == []
 
 
 def test_both_messages_are_stored_and_the_answer_keeps_its_announced_id_and_trace(
@@ -362,7 +418,7 @@ def _mention(
 ):
     if conversation_id is None:
         conversation_id = store.create(ALICE, None).id
-    return _client(store, coach, library.open, limits).post(
+    return _client(store, coach, open_decks=library.open, limits=limits, cards=library.cards).post(
         f"/conversations/{conversation_id}/messages",
         json={"content": "Does she ready runes?", "mentions": mentions},
         headers=_as(user),
@@ -391,6 +447,25 @@ def test_mentioned_cards_and_decks_reach_the_coach_resolved(
         name="Sona ramp",
         sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher",))),
     )
+
+
+def test_an_answer_to_a_mentioning_message_carries_its_validated_card_tags(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    answer = "Yes: [[Sona, Harmonious]] readies runes; [[Sona Harmonious]] is not a card."
+    coach = FakeCoach([Started(None)], Reply(answer, "answered", ()))
+
+    response = _mention(store, coach, library, [{"kind": "card", "id": SONA_ID}])
+
+    assert response.status_code == 200, response.text
+    [question] = coach.questions
+    assert [m.name for m in question.mentions] == ["Sona, Harmonious"]
+    final = parse_sse(response.text)[-1]
+    assert final.event == "final"
+    assert final.data["text"] == answer
+    assert [(c["oracle_id"], c["oracle_name"], c["tags"]) for c in final.data["cards"]] == [
+        (SONA_ID, "Sona, Harmonious", ["Sona, Harmonious"])
+    ]
 
 
 def test_a_message_without_mentions_resolves_none_and_needs_no_decks(

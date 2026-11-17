@@ -48,6 +48,13 @@ def test_sources_are_named_case_insensitively() -> None:
     assert cited_evidence(answer, [ZHONYAS]) == [ZHONYAS]
 
 
+def test_a_card_written_as_a_card_tag_still_cites_its_card_text() -> None:
+    answer = "No: [[Zhonya's Hourglass]] only grants Deflect (rule 472)."
+
+    assert cited_evidence(answer, [ZHONYAS, RULE_472]) == [ZHONYAS, RULE_472]
+    assert cited_rules(answer) == {"472"}
+
+
 def test_an_answer_that_cites_nothing_has_no_citations() -> None:
     assert cited_evidence("Which Diana do you mean?", [RULE_472, ORIGINS_FAQ]) == []
 

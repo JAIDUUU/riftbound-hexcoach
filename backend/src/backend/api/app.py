@@ -3,7 +3,8 @@ streamed chat, feedback, decks and account deletion.
 
 `create_app` takes its collaborators (the token verifier, a way to open the conversation
 store and the decks for one request, the coach that answers messages, the account
-deletion, the Langfuse client feedback is scored with, and a database ping for `/health`),
+deletion, the Langfuse client feedback is scored with, a database ping for `/health`, and
+the card catalog that answers' Card tags are checked against),
 so tests build the app with fake keys, in-memory stores, a scripted coach, a recording
 account deletion and a fake Langfuse; `production_app` wires Supabase's JWKS, Postgres,
 the real agent, Langfuse and the CORS origins from the environment. Serve it with
@@ -47,7 +48,7 @@ from backend.api.auth import (
     TokenVerifier,
     supabase_verifier,
 )
-from backend.api.turn import OpenStore, PreparedTurn, stream_turn
+from backend.api.turn import OpenCards, OpenStore, PreparedTurn, stream_turn
 from backend.cards.catalog import CardCatalog, SqlCardCatalog
 from backend.config import cors_allowed_origins, supabase_url
 from backend.conversations.limits import (
@@ -103,6 +104,7 @@ class _Collaborators:
     delete_account: DeleteAccount
     scores: ScoreClient | None
     ping_database: PingDatabase | None
+    open_cards: OpenCards | None
     limits: Limits
 
 
@@ -298,7 +300,9 @@ def post_message(
     turn: Annotated[PreparedTurn, Depends(begin_turn)], request: Request
 ) -> Iterator[ServerSentEvent]:
     collaborators = _collaborators(request)
-    yield from stream_turn(turn, collaborators.coach, collaborators.open_store)
+    yield from stream_turn(
+        turn, collaborators.coach, collaborators.open_store, collaborators.open_cards
+    )
 
 
 @router.put("/{conversation_id}/messages/{message_id}/feedback")
@@ -518,12 +522,14 @@ def create_app(
     delete_account: DeleteAccount,
     scores: ScoreClient | None = None,
     ping_database: PingDatabase | None = None,
+    open_cards: OpenCards | None = None,
     cors_origins: Sequence[str] = (),
     limits: Limits | None = None,
 ) -> FastAPI:
     """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored.
 
-    `ping_database` None means there is no database to check (tests of other endpoints).
+    `ping_database` None means there is no database to check, and `open_cards` None means
+    no Card tag ever validates (tests of other endpoints).
     `limits` holds the caps the API checks itself (mentions per message; the store
     enforces the message and history caps); None means the defaults.
     """
@@ -543,6 +549,7 @@ def create_app(
         delete_account,
         scores,
         ping_database,
+        open_cards,
         limits or Limits(),
     )
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
@@ -576,6 +583,11 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield DeckAccess(SqlDeckStore(connection), SqlCardCatalog(connection))
 
+    @contextmanager
+    def open_cards() -> Generator[CardCatalog]:
+        with engine.connect() as connection:
+            yield SqlCardCatalog(connection)
+
     def delete_user(user_id: uuid.UUID) -> None:
         with engine.begin() as connection:
             delete_account(connection, user_id)
@@ -588,6 +600,7 @@ def production_app() -> FastAPI:
         delete_account=delete_user,
         scores=langfuse_scores(),
         ping_database=lambda: ping_database(engine),
+        open_cards=open_cards,
         cors_origins=cors_allowed_origins(),
         limits=limits,
     )
