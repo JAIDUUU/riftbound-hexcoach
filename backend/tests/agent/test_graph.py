@@ -13,7 +13,16 @@ from langchain_core.tools import BaseTool
 from langchain_core.tools.base import ArgsSchema
 from pydantic import BaseModel, Field
 
-from backend.agent.graph import AgentEvent, Step, Token, Turn, format_evidence, run_agent
+from backend.agent.graph import (
+    AgentEvent,
+    MentionedCard,
+    MentionedDeck,
+    Step,
+    Token,
+    Turn,
+    format_evidence,
+    run_agent,
+)
 from backend.agent.tools import make_lookup_card
 from backend.llm.providers import AllProvidersFailedError, ProviderChain
 from backend.retrieval.repository import SearchHit
@@ -181,6 +190,32 @@ def test_message_history_reaches_the_prompts() -> None:
 
     assert "Rengar banish deck" in llm.prompts[0]  # prepare sees the conversation
     assert "Rengar banish deck" in llm.prompts[-1]  # and so does the answerer
+
+
+SONA = MentionedCard(
+    name="Sona, Harmonious",
+    text=(
+        "Sona, Harmonious (Champion Unit)\n"
+        "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
+    ),
+)
+SONA_RAMP = MentionedDeck(
+    name="Sona ramp",
+    sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher", "Recruit"))),
+)
+
+
+def test_mentioned_cards_and_decks_reach_prepare_grade_and_answer_as_player_referenced() -> None:
+    retriever = RecordingRetriever({})
+    llm = ScriptedLLM([PREPARE, STRONG, "Yes: Sona readies up to 4 friendly runes."])
+
+    run_agent(llm, retriever, "Does she ready runes?", mentions=[SONA, SONA_RAMP])
+
+    for prompt in llm.prompts:  # prepare, grade, answer
+        assert "explicitly referenced" in prompt
+        assert "ready up to 4 friendly runes" in prompt
+        assert "[Deck: Sona ramp]" in prompt
+        assert "MainDeck: Blazing Scorcher; Recruit" in prompt
 
 
 def test_the_answer_prompt_states_source_precedence() -> None:

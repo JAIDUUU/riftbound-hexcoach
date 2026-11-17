@@ -33,6 +33,7 @@ from backend.agent.prompts import (
     ANSWER_PROMPT,
     GRADE_PROMPT,
     GRADE_TOOLS_NOTE,
+    MENTIONS_NOTE,
     PREPARE_PROMPT,
     TOOLS_NOTE,
 )
@@ -124,6 +125,7 @@ class AgentState(TypedDict):
 
     question: str
     history: list[Turn]
+    mentions: list[Mentioned]  # what the player @-mentioned in `question`
     language: str
     query: str
     hits: list[SearchHit]
@@ -182,9 +184,25 @@ def format_evidence(hits: Sequence[SearchHit]) -> str:
     return "\n\n".join(lines) if lines else "(no evidence retrieved)"
 
 
+def format_mentions(mentions: Sequence[Mentioned]) -> str:
+    blocks = [MENTIONS_NOTE]
+    for mention in mentions:
+        match mention:
+            case MentionedCard(name=name, text=text):
+                blocks.append(f"[Card: {name}]\n{text}")
+            case MentionedDeck(name=name, sections=sections):
+                # Card names contain commas ("Sona, Harmonious"), so they're joined with "; ".
+                lines = [f"{section}: {'; '.join(names)}" for section, names in sections]
+                blocks.append("\n".join([f"[Deck: {name}]", *lines]))
+    return "\n\n".join(blocks)
+
+
 def _conversation(state: AgentState) -> str:
+    """The conversation so far, then whatever the latest question @-mentions."""
     turns = [*state.get("history", []), ("user", state["question"])]
-    return "\n".join(f"{role}: {content}" for role, content in turns)
+    conversation = "\n".join(f"{role}: {content}" for role, content in turns)
+    mentions = state.get("mentions", [])
+    return f"{conversation}\n\n{format_mentions(mentions)}" if mentions else conversation
 
 
 def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] = ()) -> Any:
@@ -307,6 +325,7 @@ def run_agent(
     config: RunnableConfig | None = None,
     tools: Sequence[BaseTool] = (),
     on_event: OnEvent | None = None,
+    mentions: Sequence[Mentioned] = (),
 ) -> AgentState:
     """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing).
 
@@ -315,7 +334,7 @@ def run_agent(
     stream, which real chat models do whenever someone is listening.
     """
     agent = build_agent(llm, retrieve, tools)
-    initial = {"question": question, "history": list(history)}
+    initial = {"question": question, "history": list(history), "mentions": list(mentions)}
     if on_event is None:
         return cast(AgentState, agent.invoke(initial, config))
 
