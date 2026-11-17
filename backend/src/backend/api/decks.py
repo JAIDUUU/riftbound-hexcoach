@@ -55,7 +55,7 @@ class DeckImportOut(BaseModel):
         def lines_in(section: Section) -> list[DeckLineOut]:
             return [
                 DeckLineOut(
-                    line=resolved.line.line,
+                    line=resolved.line.number,
                     count=resolved.line.count,
                     name=resolved.line.name,
                     card=CardRefOut(

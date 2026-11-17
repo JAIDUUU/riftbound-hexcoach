@@ -27,13 +27,13 @@ def test_the_grill_decisions_example_parses_into_its_sections() -> None:
     parsed = parse_decklist(_SPEC_EXAMPLE)
 
     assert parsed.lines == (
-        DeckLine(line=2, section="Legend", count=1, name="Viktor, Herald of the Arcane"),
-        DeckLine(line=5, section="Champion", count=1, name="Viktor, Innovator"),
-        DeckLine(line=8, section="MainDeck", count=3, name="Consult the Past"),
-        DeckLine(line=11, section="Battlefields", count=1, name="Ravenbloom Conservatory"),
-        DeckLine(line=14, section="Runes", count=6, name="Mind Rune"),
-        DeckLine(line=15, section="Runes", count=6, name="Order Rune"),
-        DeckLine(line=18, section="Sideboard", count=3, name="Salvage"),
+        DeckLine(number=2, section="Legend", count=1, name="Viktor, Herald of the Arcane"),
+        DeckLine(number=5, section="Champion", count=1, name="Viktor, Innovator"),
+        DeckLine(number=8, section="MainDeck", count=3, name="Consult the Past"),
+        DeckLine(number=11, section="Battlefields", count=1, name="Ravenbloom Conservatory"),
+        DeckLine(number=14, section="Runes", count=6, name="Mind Rune"),
+        DeckLine(number=15, section="Runes", count=6, name="Order Rune"),
+        DeckLine(number=18, section="Sideboard", count=3, name="Salvage"),
     )
     assert parsed.warnings == ()
 
@@ -51,8 +51,8 @@ def test_headers_forgive_case_spacing_a_missing_colon_and_windows_line_endings()
     parsed = parse_decklist(text)
 
     assert parsed.lines == (
-        DeckLine(line=2, section="Legend", count=1, name="Annie, Dark Child"),
-        DeckLine(line=5, section="MainDeck", count=3, name="Pouty Poro"),
+        DeckLine(number=2, section="Legend", count=1, name="Annie, Dark Child"),
+        DeckLine(number=5, section="MainDeck", count=3, name="Pouty Poro"),
     )
     assert parsed.warnings == ()
 

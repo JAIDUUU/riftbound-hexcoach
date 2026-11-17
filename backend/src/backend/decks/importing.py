@@ -64,12 +64,12 @@ def _cards(count: int) -> str:
 
 
 def _unknown_card(line: DeckLine, suggestions: list[str]) -> DeckWarning:
-    missing = f"Line {line.line}: no card named {line.name!r}"
+    missing = f"Line {line.number}: no card named {line.name!r}"
     if suggestions:
         return DeckWarning(
-            "unknown_card", f"{missing}. Did you mean {', '.join(suggestions)}?", line.line
+            "unknown_card", f"{missing}. Did you mean {', '.join(suggestions)}?", line.number
         )
-    return DeckWarning("unknown_card", f"{missing}, and no similar name exists.", line.line)
+    return DeckWarning("unknown_card", f"{missing}, and no similar name exists.", line.number)
 
 
 def _section_sizes(lines: Sequence[ResolvedLine], rules: DeckRules) -> list[DeckWarning]:

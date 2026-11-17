@@ -23,7 +23,7 @@ _SECTION_LIST = f"{', '.join(SECTIONS[:-1])} or {SECTIONS[-1]}"
 
 @dataclass(frozen=True, slots=True)
 class DeckLine:
-    line: int  # 1-based, so warnings and the editor agree on where a card is
+    number: int  # the 1-based line number, so warnings and the editor agree on where a card is
     section: Section
     count: int
     name: str  # as written; resolving it to a Card is import validation's job

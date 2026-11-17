@@ -26,7 +26,7 @@ def test_each_line_resolves_to_its_card_by_oracle_name_or_alias_ignoring_case(
 ) -> None:
     imported = import_decklist("MainDeck:\n3 pouty poro\n2 Recruit (NX)\n", catalog)
 
-    assert [(line.line.name, line.card and line.card.oracle_name) for line in imported.lines] == [
+    assert [(r.line.name, r.card and r.card.oracle_name) for r in imported.lines] == [
         ("pouty poro", "Pouty Poro"),
         ("Recruit (NX)", "Recruit"),
     ]
