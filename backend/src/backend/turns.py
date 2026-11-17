@@ -11,6 +11,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from backend.cards.chunk_text import card_text_chunk
+from backend.cards.collapse import Card
+
 Role = Literal["user", "assistant"]
 Turn = tuple[Role, str]
 """One conversation turn, oldest first in a history."""
@@ -43,10 +46,18 @@ class Mention:
 
 @dataclass(frozen=True, slots=True)
 class MentionedCard:
-    """A Card the player @-mentioned, with its full text."""
+    """A Card the player @-mentioned."""
 
-    name: str
-    text: str  # name, type line and cleaned text, as lookup_card returns them
+    card: Card
+
+    @property
+    def name(self) -> str:
+        return self.card.oracle_name
+
+    @property
+    def text(self) -> str:
+        """Name, type line and cleaned text, as lookup_card returns them."""
+        return card_text_chunk(self.card)
 
 
 @dataclass(frozen=True, slots=True)

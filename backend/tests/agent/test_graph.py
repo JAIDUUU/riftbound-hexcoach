@@ -197,24 +197,20 @@ def test_message_history_reaches_the_prompts() -> None:
     assert "Rengar banish deck" in llm.prompts[-1]  # and so does the answerer
 
 
-SONA = MentionedCard(
-    name="Sona, Harmonious",
-    text=(
-        "Sona, Harmonious (Champion Unit)\n"
-        "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
-    ),
-)
 SONA_RAMP = MentionedDeck(
     name="Sona ramp",
     sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher", "Recruit"))),
 )
 
 
-def test_mentioned_cards_and_decks_reach_prepare_grade_and_answer_as_player_referenced() -> None:
+def test_mentioned_cards_and_decks_reach_prepare_grade_and_answer_as_player_referenced(
+    cards_by_name: dict[str, Card],
+) -> None:
     retriever = RecordingRetriever({})
     llm = ScriptedLLM([PREPARE, STRONG, "Yes: Sona readies up to 4 friendly runes."])
+    sona = MentionedCard(cards_by_name["Sona, Harmonious"])
 
-    run_agent(llm, retriever, "Does she ready runes?", mentions=[SONA, SONA_RAMP])
+    run_agent(llm, retriever, "Does she ready runes?", mentions=[sona, SONA_RAMP])
 
     for prompt in llm.prompts:  # prepare, grade, answer
         assert "explicitly referenced" in prompt

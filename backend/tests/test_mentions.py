@@ -28,12 +28,10 @@ def test_a_mentioned_card_brings_its_type_line_and_full_cleaned_text(
         [Mention("card", uuid.UUID(sona.oracle_id))], ALICE, DeckAccess(InMemoryDeckStore(), cards)
     )
 
-    assert mentioned == MentionedCard(
-        name="Sona, Harmonious",
-        text=(
-            "Sona, Harmonious (Champion Unit)\n"
-            "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
-        ),
+    assert isinstance(mentioned, MentionedCard) and mentioned.card == sona
+    assert mentioned.text == (
+        "Sona, Harmonious (Champion Unit)\n"
+        "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
     )
 
 

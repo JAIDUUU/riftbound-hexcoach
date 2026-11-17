@@ -9,6 +9,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 
 from backend.agent.graph import AgentEvent, Started, Step
 from backend.agent.tracing import hash_user_id, traced_run, tracing_enabled
+from backend.cards.collapse import Card
 from backend.retrieval.repository import SearchHit
 from backend.turns import MentionedCard
 
@@ -71,7 +72,9 @@ def test_an_untraced_run_still_works_and_returns_no_trace_id(no_langfuse_keys: N
     assert state["answer"] == "No (rule 472)."
 
 
-def test_a_run_carries_the_questions_mentions(no_langfuse_keys: None) -> None:
+def test_a_run_carries_the_questions_mentions(
+    no_langfuse_keys: None, cards_by_name: dict[str, Card]
+) -> None:
     llm = ScriptedLLM(
         [
             '{"query": "sona ready runes", "language": "en"}',
@@ -79,7 +82,7 @@ def test_a_run_carries_the_questions_mentions(no_langfuse_keys: None) -> None:
             "Yes.",
         ]
     )
-    sona = MentionedCard(name="Sona, Harmonious", text="Ready up to 4 friendly runes.")
+    sona = MentionedCard(cards_by_name["Sona, Harmonious"])
 
     state, _ = traced_run(llm, lambda query: [], "Does she ready runes?", mentions=[sona])
 

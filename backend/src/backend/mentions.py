@@ -16,7 +16,6 @@ import uuid
 from collections.abc import Sequence
 
 from backend.cards.catalog import CardCatalog
-from backend.cards.chunk_text import card_text_chunk
 from backend.decks.access import DeckAccess
 from backend.turns import Mention, Mentioned, MentionedCard, MentionedDeck
 
@@ -33,7 +32,7 @@ def _card(mention: Mention, cards: CardCatalog) -> MentionedCard:
     card = cards.find_by_id(str(mention.id))
     if card is None:
         raise UnknownMentionError(mention)
-    return MentionedCard(name=card.oracle_name, text=card_text_chunk(card))
+    return MentionedCard(card)
 
 
 def _deck(mention: Mention, user_id: uuid.UUID, access: DeckAccess) -> MentionedDeck:
