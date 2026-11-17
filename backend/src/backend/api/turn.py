@@ -10,7 +10,8 @@ first, even when the run fails before the trace exists.
 The answer is stored before `final` is sent, by the worker thread rather than the
 response, so a player who closes the tab still finds the answer on their next visit.
 That is also why a turn whose player disconnected still counts against their message
-limits: only a turn that ends in `error` refunds its slot (`PreparedTurn.refund`).
+limits: only a turn that ends in `error` refunds its slot (`PreparedTurn.refund`), or
+one whose stream closed before its run started (see `begin_turn`).
 """
 
 import logging
@@ -19,7 +20,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
@@ -136,6 +137,7 @@ class PreparedTurn:
     question: Question
     answer_id: uuid.UUID  # the assistant message's id, announced in `start`
     refund: Callable[[], None] = lambda: None  # gives back the message's quota slot
+    started: threading.Event = field(default_factory=threading.Event)  # its run began
 
 
 def citations(reply: Reply) -> list[CitationOut]:
@@ -249,6 +251,7 @@ def stream_turn(
         finally:
             events.put(None)
 
+    turn.started.set()
     threading.Thread(target=work, name=f"turn-{turn.answer_id}", daemon=True).start()
     while (event := events.get()) is not None:
         yield event

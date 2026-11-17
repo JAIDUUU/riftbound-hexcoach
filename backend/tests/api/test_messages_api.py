@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import json
 import uuid
 from collections.abc import Generator
@@ -744,3 +746,59 @@ def test_a_failing_refund_never_replaces_the_original_refusal() -> None:
     response = _send(store, FakeCoach([Started(None)], ANSWERED), quota, conversation.id)
 
     assert response.status_code == 404
+
+
+def _post_and_drop_before_the_stream_opens(
+    app: Any, conversation_id: uuid.UUID, content: str
+) -> None:
+    """POST a message straight to the ASGI app, as a client that is gone before the
+    response starts (the server's first send fails, as on a closed socket)."""
+    body = json.dumps({"content": content}).encode()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": f"/conversations/{conversation_id}/messages",
+        "raw_path": f"/conversations/{conversation_id}/messages".encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"content-type", b"application/json"),
+            (b"authorization", f"Bearer {mint(ALICE)}".encode()),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            raise OSError("connection reset by peer")
+
+    async def call() -> None:
+        with contextlib.suppress(Exception):
+            await app(scope, receive, send)
+
+    asyncio.run(call())
+
+
+def test_a_client_gone_before_the_stream_opens_gets_its_slot_back(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    quota = _quota(per_minute=1, per_day=1)
+    coach = FakeCoach([Started(None)], ANSWERED)
+    app = make_app(store=store, coach=coach, quota=quota)
+
+    _post_and_drop_before_the_stream_opens(app, conversation.id, "Anyone there?")
+
+    assert coach.questions == []  # the run never started
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None and [m.content for m in detail.messages] == ["Anyone there?"]
+    again = store.create(ALICE, None)
+    assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200

@@ -73,7 +73,7 @@ def _check_and_resolve_mentions(
 
 def begin_turn(
     conversation_id: uuid.UUID, body: MessageIn, user: User, request: Request
-) -> PreparedTurn:
+) -> Iterator[PreparedTurn]:
     """Every check that can refuse a message, run before the event stream opens so a
     refusal is a plain HTTP error rather than an `error` event inside a 200: the
     conversation must be the user's (404), the message must fit the cap (422), its
@@ -83,7 +83,9 @@ def begin_turn(
 
     Each step is its own short transaction, one after another, so a request never holds
     two pooled connections at once. If storing the message fails after the slot was
-    taken, the slot is refunded; a turn that later ends in `error` refunds it too."""
+    taken, the slot is refunded; a turn that later ends in `error` refunds it too, and so
+    does a stream that closed before its run started (the client left first), which
+    leaves the question stored without an answer like any failed run."""
     app = collaborators(request)
     with app.open_store() as store:
         history = store.history(user.id, conversation_id)
@@ -106,7 +108,12 @@ def begin_turn(
         conversation_id=conversation_id,
         mentions=mentions,
     )
-    return PreparedTurn(question=question, answer_id=uuid.uuid4(), refund=refund)
+    turn = PreparedTurn(question=question, answer_id=uuid.uuid4(), refund=refund)
+    try:
+        yield turn  # torn down once the response is over
+    finally:
+        if not turn.started.is_set():
+            _refund_quietly(refund)
 
 
 @router.post("/{conversation_id}/messages", response_class=EventSourceResponse)
