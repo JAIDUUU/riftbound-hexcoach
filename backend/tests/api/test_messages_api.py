@@ -220,7 +220,7 @@ class _UnreachableCatalog:
     def find(self, name: str) -> Card | None:
         raise ConnectionError("cards table unreachable")
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+    def find_by_id(self, oracle_id: str) -> Card | None:
         raise ConnectionError("cards table unreachable")
 
     def all_names(self) -> list[str]:

@@ -26,8 +26,7 @@ def _slug(name: str) -> str:
 
 
 def preview_image_url(card: Card) -> str:
-    collector_number = card.representative_id.split("-")[1]
     return (
-        f"{_HOST}/cards/normal/front/{card.set_code.lower()}/{collector_number}/"
+        f"{_HOST}/cards/normal/front/{card.set_code.lower()}/{card.collector_number}/"
         f"{_slug(card.oracle_name)}.webp"
     )

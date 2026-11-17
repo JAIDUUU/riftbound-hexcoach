@@ -7,7 +7,6 @@ suggestion is always a name that would resolve if picked.
 """
 
 import difflib
-import uuid
 from collections.abc import Iterable, Sequence
 from typing import Protocol
 
@@ -25,7 +24,7 @@ class CardCatalog(Protocol):
         """The Card answering to `name` (oracle name or alias, any case), or None."""
         ...
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+    def find_by_id(self, oracle_id: str) -> Card | None:
         """The Card with this oracle id (the `id` the client card index exposes), or None."""
         ...
 
@@ -43,7 +42,7 @@ class SqlCardCatalog:
     def find(self, name: str) -> Card | None:
         return find_by_oracle_name(self.connection, name)
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+    def find_by_id(self, oracle_id: str) -> Card | None:
         return find_by_oracle_id(self.connection, oracle_id)
 
     def all_names(self) -> list[str]:

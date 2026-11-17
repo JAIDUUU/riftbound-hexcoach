@@ -4,7 +4,6 @@ test_catalog_contract.py holds this and SqlCardCatalog to the same matching rule
 name or alias, ignoring case, the oracle name winning a clash).
 """
 
-import uuid
 from collections.abc import Iterable
 
 from backend.cards.collapse import Card
@@ -22,8 +21,8 @@ class InMemoryCardCatalog:
         ]
         return next(iter(by_oracle_name + by_alias), None)
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
-        return next((card for card in self.cards if uuid.UUID(card.oracle_id) == oracle_id), None)
+    def find_by_id(self, oracle_id: str) -> Card | None:
+        return next((card for card in self.cards if card.oracle_id == oracle_id), None)
 
     def all_names(self) -> list[str]:
         names = {card.oracle_name for card in self.cards}

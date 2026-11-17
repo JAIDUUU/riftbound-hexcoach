@@ -40,6 +40,12 @@ class Card:
     printing_count: int
     snapshot_fetched: datetime
 
+    @property
+    def collector_number(self) -> str:
+        """The representative printing's collector number, the middle of its riftboundId
+        (`ogn-013-298` -> `013`, `ven-sp2-006` -> `sp2`)."""
+        return self.representative_id.split("-")[1]
+
 
 def _is_plain(printing: RifthuntPrinting) -> bool:
     """A plain printing is not alternate art, signature or overnumbered, and has no name suffix."""

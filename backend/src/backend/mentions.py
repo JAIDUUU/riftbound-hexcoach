@@ -30,7 +30,7 @@ class UnknownMentionError(LookupError):
 
 
 def _card(mention: Mention, cards: CardCatalog) -> MentionedCard:
-    card = cards.find_by_id(mention.id)
+    card = cards.find_by_id(str(mention.id))
     if card is None:
         raise UnknownMentionError(mention)
     return MentionedCard(name=card.oracle_name, text=card_text_chunk(card))
