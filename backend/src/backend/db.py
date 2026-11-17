@@ -12,9 +12,13 @@ def make_engine() -> Engine:
 
 
 def ping_database(engine: Engine) -> None:
-    """One trivial round trip; raises if the database can't be reached."""
+    """One cheap read of a real table; raises if the database can't be reached.
+
+    A table read rather than `SELECT 1` because Supabase counts "user queries" when
+    deciding to pause a free project (which queries count is unpublished, so unverified).
+    """
     with engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
+        connection.execute(text("SELECT 1 FROM cards LIMIT 1"))
 
 
 def upgrade_to_head() -> None:
