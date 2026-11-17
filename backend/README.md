@@ -37,6 +37,7 @@ uv run backend ask <question>  # answer a rules question judge-style, with citat
 uv run backend ping <prompt>   # smoke-test the LLM provider fallback chain with one raw prompt
 uv run backend check-golden    # validate data/golden/golden-set.yaml
 uv run backend eval-retrieval --run-name <name>  # score retrieval on the golden set via Langfuse
+uv run backend eval-agent --run-name <name>      # run the full agent on the golden set via Langfuse
 ```
 
 `refresh-cards` rewrites `data/cards/rifthunt-snapshot.json` (one card per line, so diffs stay
@@ -106,6 +107,20 @@ and records a `rule_hit_rate` score per item (the share of expected rule ids amo
 `-k` hits, default 10). It needs `DATABASE_URL`, ingested rules and the `LANGFUSE_*` keys.
 `abstain` items (where the coach should ask for clarification instead of answering) are
 uploaded for later answer-level evals but skipped at the retrieval level.
+
+`eval-agent` is the answer-level eval: it runs the full agent on every golden item and
+records two scores per item in the Langfuse run — `behaviour_correct` (did it answer when
+it should answer and abstain when it should abstain) and, for `answer` items,
+`citation_score` (the share of expected rule ids actually cited in the answer). Scoring
+lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
+
+### Tracing
+
+When the `LANGFUSE_*` keys are set, every `ask` (and every `eval-agent` item) produces a
+Langfuse trace covering the graph steps and LLM calls, and the CLI prints the trace id.
+User ids are never sent raw — `backend.agent.tracing.hash_user_id` stores a SHA-256
+pseudonym — and the conversation id becomes the Langfuse session id. Without the keys,
+`ask` runs untraced and says so; nothing else changes.
 
 ## Tests
 

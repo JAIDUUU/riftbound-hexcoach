@@ -16,7 +16,7 @@ from typing import Any, Literal, TypedDict, cast
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.graph import END, START, StateGraph  # pyright: ignore[reportMissingTypeStubs]
 
 from backend.agent.prompts import ABSTAIN_PROMPT, ANSWER_PROMPT, GRADE_PROMPT, PREPARE_PROMPT
@@ -181,7 +181,9 @@ def run_agent(
     retrieve: Retriever,
     question: str,
     history: Sequence[Turn] = (),
+    config: RunnableConfig | None = None,
 ) -> AgentState:
+    """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing)."""
     agent = build_agent(llm, retrieve)
     initial = {"question": question, "history": list(history)}
-    return cast(AgentState, agent.invoke(initial))
+    return cast(AgentState, agent.invoke(initial, config))

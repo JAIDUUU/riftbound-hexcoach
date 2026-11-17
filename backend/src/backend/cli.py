@@ -278,7 +278,7 @@ def _ping(args: argparse.Namespace) -> int:
 
 
 def _ask(args: argparse.Namespace) -> int:
-    from backend.agent.graph import run_agent
+    from backend.agent.tracing import traced_run, tracing_enabled
     from backend.db import make_engine
     from backend.llm.providers import chat_chain
     from backend.retrieval.embedding import embedder
@@ -287,6 +287,8 @@ def _ask(args: argparse.Namespace) -> int:
     chain = chat_chain()
     for provider in chain.skipped:
         print(f"note: {provider} has no API key and was skipped")
+    if not tracing_enabled():
+        print("note: LANGFUSE keys not set, this run will not be traced")
 
     engine = make_engine()
     with engine.connect() as connection:
@@ -296,13 +298,64 @@ def _ask(args: argparse.Namespace) -> int:
                 connection, query, embedder().embed_query(query), limit=args.limit
             )
 
-        state = run_agent(chain, retrieve, " ".join(args.question))
+        state, trace_id = traced_run(chain, retrieve, " ".join(args.question))
     engine.dispose()
 
     print(state["answer"])
     print()
     label = "answered" if state["outcome"] == "answered" else "abstained"
-    print(f"[{label} \u00b7 query: {state['query']!r} \u00b7 {len(state['hits'])} chunks]")
+    trace = f" \u00b7 trace {trace_id}" if trace_id else ""
+    print(f"[{label} \u00b7 query: {state['query']!r} \u00b7 {len(state['hits'])} chunks{trace}]")
+    return 0
+
+
+def _eval_agent(args: argparse.Namespace) -> int:
+    from backend.agent.tracing import traced_run
+    from backend.db import make_engine
+    from backend.evals.agent_eval import (
+        aggregate_behaviour_accuracy,
+        aggregate_citation_score,
+    )
+    from backend.evals.golden import load_golden_set
+    from backend.evals.langfuse_run import langfuse_client, run_agent_experiment, upload_golden_set
+    from backend.llm.providers import chat_chain
+    from backend.retrieval.embedding import embedder
+    from backend.retrieval.repository import SearchHit, hybrid_search_chunks
+
+    items = load_golden_set(GOLDEN_SET_PATH)
+    client = langfuse_client()
+    upload_golden_set(client, items)
+    chain = chat_chain()
+
+    engine = make_engine()
+    with engine.connect() as connection:
+
+        def retrieve(query: str) -> list[SearchHit]:
+            return hybrid_search_chunks(
+                connection, query, embedder().embed_query(query), limit=args.limit
+            )
+
+        def ask(question: str) -> tuple[str, str]:
+            state, _ = traced_run(chain, retrieve, question)
+            return state["answer"], state["outcome"]
+
+        results = run_agent_experiment(client, items, ask, args.run_name)
+    engine.dispose()
+
+    for result in results:
+        behaviour = "ok" if result.behaviour_correct else f"WRONG ({result.outcome})"
+        citation = (
+            f" \u00b7 citations {result.citation_score:.2f}"
+            + (f" missing: {', '.join(result.missing)}" if result.missing else "")
+            if result.citation_score is not None
+            else ""
+        )
+        print(f"{result.item_id}: behaviour {behaviour}{citation}")
+    print(
+        f"Aggregate over {len(results)} items: behaviour accuracy "
+        f"{aggregate_behaviour_accuracy(results):.2f}, citation score "
+        f"{aggregate_citation_score(results):.2f}"
+    )
     return 0
 
 
@@ -364,6 +417,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluator.add_argument("--run-name", required=True, help="Experiment run name in Langfuse")
     evaluator.add_argument("-k", "--limit", type=int, default=10, help="Chunks per query")
+    agent_eval = add(
+        "eval-agent", _eval_agent, "Run the golden set through the full agent via Langfuse."
+    )
+    agent_eval.add_argument("--run-name", required=True, help="Experiment run name in Langfuse")
+    agent_eval.add_argument("-k", "--limit", type=int, default=8, help="Chunks per retrieval")
     return parser
 
 
