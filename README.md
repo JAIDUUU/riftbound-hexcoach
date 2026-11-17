@@ -118,17 +118,25 @@ placeholders until they are checked against the official rules.
 | `PUT /decks/{id}` | Replace a deck's name and text. |
 | `DELETE /decks/{id}` | Delete a deck. |
 
-### In progress
+### Account
 
-Still being built, so the exact shape may change:
+| Method and path | What it does |
+| --- | --- |
+| `DELETE /account` | Delete your account: your Supabase sign-in, conversations, messages, feedback and decks. It can't be undone; the app asks you to confirm first. |
 
-- Account deletion, which removes your conversations, messages and decks
-  ([#21](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/21)).
+Your current access token keeps working until it expires (Supabase access tokens are
+stateless), so the app signs you out right after.
 
 ## Privacy
 
-When tracing is on, Langfuse traces contain the text of your messages. User ids are stored
-there only as a hashed pseudonym, and you can delete your conversations at any time.
+- When tracing is on, Langfuse traces contain the text of your messages and the answers.
+- Langfuse never gets your user id, only a hashed pseudonym of it. Your conversation id is
+  used as the Langfuse session id.
+- You can delete a conversation, or your whole account, at any time. Deleting your account
+  removes your sign-in, conversations, messages, feedback and decks from our database.
+- Deleting doesn't remove Langfuse traces. They stay, linked only to the hashed id and the
+  conversation id.
+- How long Langfuse keeps traces is **unverified**. It will be stated here once checked.
 
 ## More
 

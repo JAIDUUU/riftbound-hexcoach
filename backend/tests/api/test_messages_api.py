@@ -17,6 +17,7 @@ from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
 from backend.quota.admission import MessageQuota, QuotaSettings
 from backend.retrieval.repository import SearchHit
+from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import FakeCoach
 from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
@@ -81,7 +82,14 @@ def _client(
         yield store
 
     return TestClient(
-        create_app(fake_verifier(), open_store, open_decks=no_decks, coach=coach, quota=quota)
+        create_app(
+            fake_verifier(),
+            open_store,
+            open_decks=no_decks,
+            coach=coach,
+            delete_account=unused_account_deletion,
+            quota=quota,
+        )
     )
 
 
