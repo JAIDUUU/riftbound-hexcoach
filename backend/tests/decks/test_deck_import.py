@@ -2,7 +2,12 @@ import pytest
 
 from backend.cards.collapse import Card
 from backend.decks.construction import DeckRules
-from backend.decks.importing import import_decklist
+from backend.decks.importing import (
+    DEFAULT_MAX_DECKLIST_CHARS,
+    DecklistTooLongError,
+    import_decklist,
+    max_decklist_chars_from_env,
+)
 from backend.decks.warnings import DeckWarning
 from tests.cards.memory_catalog import InMemoryCardCatalog
 
@@ -173,3 +178,29 @@ def test_battlefields_must_be_unique_and_runes_have_no_copy_limit(
     assert [w.message for w in copy_warnings] == [
         "2 copies of the battlefield Field A; the limit is 1.",
     ]
+
+
+def test_a_decklist_over_the_size_cap_is_refused_before_it_is_read(
+    catalog: InMemoryCardCatalog,
+) -> None:
+    import_decklist("Runes:\n12 x", catalog, max_chars=11)
+
+    with pytest.raises(DecklistTooLongError) as caught:
+        import_decklist("Runes:\n12 xy", catalog, max_chars=11)
+
+    assert (caught.value.length, caught.value.cap) == (12, 11)
+    assert str(caught.value) == "Decklist is 12 characters; the limit is 11."
+
+
+def test_without_a_cap_any_length_is_read(catalog: InMemoryCardCatalog) -> None:
+    text = "MainDeck:\n" + "1 Pouty Poro\n" * 1000
+
+    assert len(import_decklist(text, catalog, max_chars=None).lines) == 1000
+
+
+def test_the_size_cap_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_DECKLIST_CHARS", "")
+    assert max_decklist_chars_from_env() == DEFAULT_MAX_DECKLIST_CHARS
+
+    monkeypatch.setenv("MAX_DECKLIST_CHARS", "900")
+    assert max_decklist_chars_from_env() == 900

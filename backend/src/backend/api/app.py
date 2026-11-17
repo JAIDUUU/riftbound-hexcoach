@@ -59,7 +59,13 @@ from backend.conversations.store import (
     SqlConversationStore,
     UnscorableMessageError,
 )
-from backend.decks.importing import DeckImport, import_decklist
+from backend.decks.importing import (
+    DEFAULT_MAX_DECKLIST_CHARS,
+    DeckImport,
+    DecklistTooLongError,
+    import_decklist,
+    max_decklist_chars_from_env,
+)
 from backend.decks.parse import SECTIONS, Section
 from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckStore
 from backend.decks.warnings import WarningKind
@@ -78,6 +84,15 @@ class DeckAccess:
 
     decks: DeckStore
     cards: CardCatalog
+    max_decklist_chars: int = DEFAULT_MAX_DECKLIST_CHARS
+
+    def import_new(self, decklist: str) -> DeckImport:
+        """A decklist the player is sending now, held to the size cap."""
+        return import_decklist(decklist, self.cards, max_chars=self.max_decklist_chars)
+
+    def import_saved(self, deck: Deck) -> DeckImport:
+        """A deck already saved under the cap of its day, which may have been higher."""
+        return import_decklist(deck.decklist, self.cards, max_chars=None)
 
 
 OpenDecks = Callable[[], AbstractContextManager[DeckAccess]]
@@ -404,12 +419,12 @@ decks_router = APIRouter(prefix="/decks")
 @decks_router.post("/preview")
 def preview_deck(body: DecklistIn, user: User, access: Decks) -> DeckImportOut:
     """Import validation without saving, for the Decks page's preview."""
-    return DeckImportOut.of(import_decklist(body.decklist, access.cards))
+    return DeckImportOut.of(access.import_new(body.decklist))
 
 
 @decks_router.post("", status_code=status.HTTP_201_CREATED)
 def create_deck(body: DeckIn, user: User, access: Decks) -> DeckOut:
-    imported = import_decklist(body.decklist, access.cards)
+    imported = access.import_new(body.decklist)
     return DeckOut.of_import(access.decks.create(user.id, body.name, body.decklist), imported)
 
 
@@ -423,12 +438,12 @@ def read_deck(deck_id: uuid.UUID, user: User, access: Decks) -> DeckOut:
     deck = access.decks.get(user.id, deck_id)
     if deck is None:
         raise _deck_not_found()
-    return DeckOut.of_import(deck, import_decklist(deck.decklist, access.cards))
+    return DeckOut.of_import(deck, access.import_saved(deck))
 
 
 @decks_router.put("/{deck_id}")
 def update_deck(deck_id: uuid.UUID, body: DeckIn, user: User, access: Decks) -> DeckOut:
-    imported = import_decklist(body.decklist, access.cards)
+    imported = access.import_new(body.decklist)
     deck = access.decks.update(user.id, deck_id, body.name, body.decklist)
     if deck is None:
         raise _deck_not_found()
@@ -464,7 +479,7 @@ def health(request: Request) -> HealthOut:
     return HealthOut(status="ok")
 
 
-def _message_too_long(request: Request, error: Exception) -> JSONResponse:
+def _too_long(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
     )
@@ -512,9 +527,10 @@ def create_app(
     app.state.collaborators = _Collaborators(
         verifier, open_store, open_decks, coach, scores, ping_database, quota
     )
-    # App-wide: the cap is enforced in the store, so any endpoint that writes a player
-    # message gets a clear 422 rather than a 500.
-    app.add_exception_handler(MessageTooLongError, _message_too_long)
+    # App-wide: the caps are enforced in the store and in import_decklist, so any endpoint
+    # that takes a player message or decklist gets a clear 422 rather than a 500.
+    app.add_exception_handler(MessageTooLongError, _too_long)
+    app.add_exception_handler(DecklistTooLongError, _too_long)
     app.add_exception_handler(QuotaExceededError, _quota_exceeded)
     app.include_router(router)
     app.include_router(decks_router)
@@ -531,6 +547,7 @@ def production_app() -> FastAPI:
 
     engine = make_engine()
     limits = limits_from_env()
+    max_decklist_chars = max_decklist_chars_from_env()
 
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
@@ -540,7 +557,9 @@ def production_app() -> FastAPI:
     @contextmanager
     def open_decks() -> Generator[DeckAccess]:
         with engine.begin() as connection:
-            yield DeckAccess(SqlDeckStore(connection), SqlCardCatalog(connection))
+            yield DeckAccess(
+                SqlDeckStore(connection), SqlCardCatalog(connection), max_decklist_chars
+            )
 
     @contextmanager
     def open_usage() -> Generator[UsageStore]:
