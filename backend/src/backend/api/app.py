@@ -63,6 +63,8 @@ from backend.decks.importing import DeckImport, import_decklist
 from backend.decks.parse import SECTIONS, Section
 from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckStore
 from backend.decks.warnings import WarningKind
+from backend.quota.admission import MessageQuota, QuotaExceededError, quota_settings_from_env
+from backend.quota.store import SqlUsageStore, UsageStore
 
 _log = logging.getLogger(__name__)
 
@@ -90,6 +92,7 @@ class _Collaborators:
     coach: Coach
     scores: ScoreClient | None
     ping_database: PingDatabase | None
+    quota: MessageQuota | None
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -224,6 +227,14 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _count_against_quota(request: Request, user: AuthenticatedUser) -> None:
+    """First, so a refused player costs no database work beyond the counter. Anything
+    admitted counts, even a message then refused as 404 or 422 or a run that fails."""
+    quota = _collaborators(request).quota
+    if quota is not None:
+        quota.admit(user.id)
+
+
 class MessageIn(BaseModel):
     """A player message. The length cap is configuration, enforced by the store."""
 
@@ -234,9 +245,11 @@ def begin_turn(
     conversation_id: uuid.UUID, body: MessageIn, user: User, request: Request
 ) -> PreparedTurn:
     """Every check that can refuse a message, run before the event stream opens so a
-    refusal is a plain HTTP error rather than an `error` event inside a 200: the
-    conversation must be the user's (404) and the message must fit the cap (422). The
-    player's message is committed here; the answer is stored when it is ready."""
+    refusal is a plain HTTP error rather than an `error` event inside a 200: the player
+    must be within their message limits (429), the conversation must be the user's (404)
+    and the message must fit the cap (422). The player's message is committed here; the
+    answer is stored when it is ready."""
+    _count_against_quota(request, user)
     with _collaborators(request).open_store() as store:
         history = store.history(user.id, conversation_id)
         if history is None:
@@ -457,6 +470,21 @@ def _message_too_long(request: Request, error: Exception) -> JSONResponse:
     )
 
 
+def _quota_exceeded(request: Request, error: Exception) -> JSONResponse:
+    # Retry-After is repeated in the body: a cross-origin fetch can't read the header
+    # unless CORS exposes it.
+    refusal = cast(QuotaExceededError, error)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": refusal.message,
+            "code": refusal.code,
+            "retry_after": refusal.retry_after,
+        },
+        headers={"Retry-After": str(refusal.retry_after)},
+    )
+
+
 def create_app(
     verifier: TokenVerifier,
     open_store: OpenStore,
@@ -466,10 +494,12 @@ def create_app(
     scores: ScoreClient | None = None,
     ping_database: PingDatabase | None = None,
     cors_origins: Sequence[str] = (),
+    quota: MessageQuota | None = None,
 ) -> FastAPI:
     """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored.
 
-    `ping_database` None means there is no database to check (tests of other endpoints).
+    `ping_database` None means there is no database to check (tests of other endpoints),
+    and `quota` None means messages are not limited per player (likewise).
     """
     app = FastAPI(title="HexCoach API")
     # The frontend authenticates with a bearer header, never cookies, so no credentials mode.
@@ -480,11 +510,12 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.collaborators = _Collaborators(
-        verifier, open_store, open_decks, coach, scores, ping_database
+        verifier, open_store, open_decks, coach, scores, ping_database, quota
     )
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
     app.add_exception_handler(MessageTooLongError, _message_too_long)
+    app.add_exception_handler(QuotaExceededError, _quota_exceeded)
     app.include_router(router)
     app.include_router(decks_router)
     app.include_router(health_router)
@@ -511,6 +542,11 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield DeckAccess(SqlDeckStore(connection), SqlCardCatalog(connection))
 
+    @contextmanager
+    def open_usage() -> Generator[UsageStore]:
+        with engine.begin() as connection:
+            yield SqlUsageStore(connection)
+
     return create_app(
         supabase_verifier(supabase_url()),
         open_store,
@@ -519,4 +555,5 @@ def production_app() -> FastAPI:
         scores=langfuse_scores(),
         ping_database=lambda: ping_database(engine),
         cors_origins=cors_allowed_origins(),
+        quota=MessageQuota(quota_settings_from_env(), open_usage),
     )

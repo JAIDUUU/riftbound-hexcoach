@@ -1,6 +1,4 @@
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -14,9 +12,8 @@ from backend.quota.admission import (
     QuotaSettings,
     quota_settings_from_env,
 )
-from backend.quota.store import UsageStore
 from tests.quota.fake_clock import FakeClock
-from tests.quota.memory_usage import InMemoryUsageStore
+from tests.quota.memory_usage import memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -24,14 +21,7 @@ BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
 EVENING = datetime(2026, 11, 17, 22, 30, tzinfo=UTC)
 
 
-def _quota(settings: QuotaSettings, clock: FakeClock) -> MessageQuota:
-    usage = InMemoryUsageStore()
-
-    @contextmanager
-    def open_usage() -> Generator[UsageStore]:
-        yield usage
-
-    return MessageQuota(settings, open_usage, clock)
+_quota = memory_quota
 
 
 def _refusal(quota: MessageQuota, user: uuid.UUID = ALICE) -> QuotaExceededError:

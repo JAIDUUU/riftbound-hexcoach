@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -15,11 +15,14 @@ from backend.api.app import create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
+from backend.quota.admission import MessageQuota, QuotaSettings
 from backend.retrieval.repository import SearchHit
 from tests.api.coaches import FakeCoach
 from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import no_decks
+from tests.quota.fake_clock import FakeClock
+from tests.quota.memory_usage import memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -70,12 +73,16 @@ def store() -> InMemoryConversationStore:
     return InMemoryConversationStore(Limits())
 
 
-def _client(store: InMemoryConversationStore, coach: FakeCoach) -> TestClient:
+def _client(
+    store: InMemoryConversationStore, coach: FakeCoach, quota: MessageQuota | None = None
+) -> TestClient:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return TestClient(create_app(fake_verifier(), open_store, open_decks=no_decks, coach=coach))
+    return TestClient(
+        create_app(fake_verifier(), open_store, open_decks=no_decks, coach=coach, quota=quota)
+    )
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -88,8 +95,9 @@ def _post(
     conversation_id: uuid.UUID,
     body: dict[str, Any],
     headers: dict[str, str],
+    quota: MessageQuota | None = None,
 ):
-    return _client(store, coach).post(
+    return _client(store, coach, quota).post(
         f"/conversations/{conversation_id}/messages", json=body, headers=headers
     )
 
@@ -303,3 +311,83 @@ def test_a_conversation_deleted_mid_answer_ends_with_an_error_not_a_final(
 
     assert events[-1].event == "error"
     assert events[-1].data["code"] == "conversation_deleted"
+
+
+EVENING = datetime(2026, 11, 17, 22, 30, tzinfo=UTC)  # 90 minutes before the UTC day ends
+
+
+def _quota(per_minute: int = 100, per_day: int = 100) -> MessageQuota:
+    settings = QuotaSettings(messages_per_minute=per_minute, messages_per_day=per_day)
+    return memory_quota(settings, FakeClock(EVENING))
+
+
+def _send(
+    store: InMemoryConversationStore,
+    coach: FakeCoach,
+    quota: MessageQuota,
+    conversation_id: uuid.UUID,
+    content: str = "Can I score twice?",
+):
+    return _post(store, coach, conversation_id, {"content": content}, _as(ALICE), quota)
+
+
+def test_a_used_up_daily_quota_is_a_typed_429_before_any_stream_opens(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+    quota = _quota(per_day=1)
+    assert _send(store, coach, quota, conversation.id, "first").status_code == 200
+
+    response = _send(store, coach, quota, conversation.id, "second")
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == str(90 * 60)
+    body = response.json()
+    assert (body["code"], body["retry_after"]) == ("daily_quota_reached", 90 * 60)
+    assert "00:00 UTC" in body["detail"]
+    assert [q.text for q in coach.questions] == ["first"]
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None
+    assert [m.content for m in detail.messages if m.role == "user"] == ["first"]
+
+
+def test_a_burst_of_messages_is_throttled_with_a_typed_429(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+    quota = _quota(per_minute=1)
+    _send(store, coach, quota, conversation.id)
+
+    response = _send(store, coach, quota, conversation.id)
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+    assert response.json()["code"] == "rate_limited"
+    assert len(coach.questions) == 1
+
+
+def test_a_message_refused_for_its_length_still_counts_against_the_quota() -> None:
+    store = InMemoryConversationStore(Limits(max_message_chars=10))
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+    quota = _quota(per_day=1)
+    assert _send(store, coach, quota, conversation.id, "x" * 11).status_code == 422
+
+    assert _send(store, coach, quota, conversation.id, "short").status_code == 429
+
+
+def test_a_run_that_fails_still_counts_against_the_quota(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    exhausted = AllProvidersFailedError([("gemini", RuntimeError("429"))])
+    quota = _quota(per_day=1)
+    _send(store, FakeCoach([Started(None)], error=exhausted), quota, conversation.id)
+
+    retry = _send(
+        store, FakeCoach([Started(None)], Reply("a", "answered", ())), quota, conversation.id
+    )
+
+    assert retry.status_code == 429
