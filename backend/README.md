@@ -127,7 +127,7 @@ lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
 
 ### The HTTP API
 
-`serve` runs a FastAPI app (`backend/api/app.py`). It needs `DATABASE_URL`,
+`serve` runs a FastAPI app (`backend/api/app.py` composes it from one module per area). It needs `DATABASE_URL`,
 `SUPABASE_URL` and at least one chat provider key at startup. Every endpoint except
 `GET /health` needs the signed-in user's Supabase access token as
 `Authorization: Bearer <jwt>`. Tokens are verified

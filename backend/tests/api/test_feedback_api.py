@@ -10,7 +10,8 @@ from typing import Literal
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import OpenStore, create_app
+from backend.api.app import create_app
+from backend.api.turn import OpenStore
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from tests.api.accounts import unused_account_deletion

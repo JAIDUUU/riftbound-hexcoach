@@ -1,7 +1,7 @@
 """One chat turn, streamed as server-sent events (issue #12, ADR 0005).
 
 The player's message is already stored and checked by the time a turn runs (see
-`begin_turn` in app.py), so everything here happens inside an open 200 stream. Events:
+`begin_turn` in messages.py), so everything here happens inside an open 200 stream. Events:
 `start` (the answer's message id and the trace id), `status` (a graph step began),
 `token` (a piece of the answer), then exactly one of `final` (the full text, citations
 and validated cards) or `error` (a typed, user-presentable reason). `start` is always
