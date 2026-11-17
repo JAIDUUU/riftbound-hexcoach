@@ -13,6 +13,7 @@ from backend.conversations.limits import MAX_TITLE_CHARS, Limits
 from backend.conversations.store import ConversationStore
 from tests.api.tokens import ISSUER, fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
+from tests.decks.memory_store import no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -28,7 +29,7 @@ def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return create_app(verifier, open_store)
+    return create_app(verifier, open_store, no_decks)
 
 
 def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:

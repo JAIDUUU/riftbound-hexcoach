@@ -8,6 +8,7 @@ from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from tests.api.tokens import fake_verifier
 from tests.conversations.memory_store import InMemoryConversationStore
+from tests.decks.memory_store import no_decks
 
 FRONTEND = "https://hexcoach.example"
 
@@ -30,7 +31,9 @@ def _preflight(client: TestClient, origin: str) -> dict[str, str]:
 
 
 def test_a_configured_frontend_may_call_the_api_with_its_bearer_token() -> None:
-    client = TestClient(create_app(fake_verifier(), _open_store, cors_origins=(FRONTEND,)))
+    client = TestClient(
+        create_app(fake_verifier(), _open_store, no_decks, cors_origins=(FRONTEND,))
+    )
 
     headers = _preflight(client, FRONTEND)
 
@@ -40,7 +43,9 @@ def test_a_configured_frontend_may_call_the_api_with_its_bearer_token() -> None:
 
 
 def test_other_origins_get_no_cors_permission() -> None:
-    client = TestClient(create_app(fake_verifier(), _open_store, cors_origins=(FRONTEND,)))
+    client = TestClient(
+        create_app(fake_verifier(), _open_store, no_decks, cors_origins=(FRONTEND,))
+    )
 
     headers = _preflight(client, "https://evil.example")
 

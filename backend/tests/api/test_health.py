@@ -8,6 +8,7 @@ from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from tests.api.tokens import fake_verifier
 from tests.conversations.memory_store import InMemoryConversationStore
+from tests.decks.memory_store import no_decks
 
 
 @contextmanager
@@ -21,7 +22,9 @@ def test_health_is_ok_without_a_token_when_the_database_answers() -> None:
     def ping_database() -> None:
         pings.append(None)
 
-    client = TestClient(create_app(fake_verifier(), _open_store, ping_database=ping_database))
+    client = TestClient(
+        create_app(fake_verifier(), _open_store, no_decks, ping_database=ping_database)
+    )
 
     response = client.get("/health")
 
@@ -34,7 +37,9 @@ def test_health_is_a_503_when_the_database_is_unreachable() -> None:
     def database_down() -> None:
         raise ConnectionError("connection refused")
 
-    client = TestClient(create_app(fake_verifier(), _open_store, ping_database=database_down))
+    client = TestClient(
+        create_app(fake_verifier(), _open_store, no_decks, ping_database=database_down)
+    )
 
     response = client.get("/health")
 
