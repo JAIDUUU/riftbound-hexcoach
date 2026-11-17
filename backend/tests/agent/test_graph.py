@@ -15,17 +15,15 @@ from pydantic import BaseModel, Field
 
 from backend.agent.graph import (
     AgentEvent,
-    MentionedCard,
-    MentionedDeck,
     Step,
     Token,
-    Turn,
     format_evidence,
     run_agent,
 )
 from backend.agent.tools import make_lookup_card
 from backend.llm.providers import AllProvidersFailedError, ProviderChain
 from backend.retrieval.repository import SearchHit
+from backend.turns import MentionedCard, MentionedDeck, Turn
 
 
 class ScriptedLLM(Runnable[LanguageModelInput, BaseMessage]):

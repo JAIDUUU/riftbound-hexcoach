@@ -7,9 +7,10 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable, RunnableConfig
 
-from backend.agent.graph import AgentEvent, MentionedCard, Started, Step
+from backend.agent.graph import AgentEvent, Started, Step
 from backend.agent.tracing import hash_user_id, traced_run, tracing_enabled
 from backend.retrieval.repository import SearchHit
+from backend.turns import MentionedCard
 
 
 class ScriptedLLM(Runnable[LanguageModelInput, BaseMessage]):

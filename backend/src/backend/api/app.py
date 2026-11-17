@@ -39,7 +39,6 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
 from backend.agent.coach import Coach, Question
-from backend.agent.graph import Mentioned, Role
 from backend.agent.tracing import ScoreClient, langfuse_scores, score_feedback
 from backend.api.auth import (
     AuthenticatedUser,
@@ -77,9 +76,10 @@ from backend.decks.importing import (
 from backend.decks.parse import SECTIONS, Section
 from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckStore
 from backend.decks.warnings import WarningKind
-from backend.mentions import Mention, MentionKind, UnknownMentionError, resolve_mentions
+from backend.mentions import UnknownMentionError, resolve_mentions
 from backend.quota.admission import MessageQuota, QuotaExceededError, quota_settings_from_env
 from backend.quota.store import SqlUsageStore, UsageStore
+from backend.turns import Mention, Mentioned, MentionKind, Role
 
 _log = logging.getLogger(__name__)
 

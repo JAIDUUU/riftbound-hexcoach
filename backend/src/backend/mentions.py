@@ -14,22 +14,12 @@ resolve to a Card are left out (the agent can still `lookup_card` any name it ne
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Literal
 
-from backend.agent.graph import Mentioned, MentionedCard, MentionedDeck
 from backend.cards.catalog import CardCatalog
 from backend.cards.chunk_text import card_text_chunk
 from backend.decks.importing import import_decklist
 from backend.decks.store import DeckStore
-
-MentionKind = Literal["card", "deck"]
-
-
-@dataclass(frozen=True, slots=True)
-class Mention:
-    kind: MentionKind
-    id: uuid.UUID
+from backend.turns import Mention, Mentioned, MentionedCard, MentionedDeck
 
 
 class UnknownMentionError(LookupError):

@@ -24,9 +24,9 @@ from sqlalchemy import (
     update,
 )
 
-from backend.agent.graph import Role, Turn
 from backend.conversations.limits import Limits
 from backend.conversations.schema import conversations_table, messages_table
+from backend.turns import Role, Turn
 
 
 @dataclass(frozen=True, slots=True)

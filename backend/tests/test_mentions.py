@@ -2,10 +2,10 @@ import uuid
 
 import pytest
 
-from backend.agent.graph import MentionedCard, MentionedDeck
 from backend.cards.collapse import Card
 from backend.decks.importing import DEFAULT_MAX_DECKLIST_CHARS
-from backend.mentions import Mention, UnknownMentionError, resolve_mentions
+from backend.mentions import UnknownMentionError, resolve_mentions
+from backend.turns import Mention, MentionedCard, MentionedDeck
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.decks.memory_store import InMemoryDeckStore
 

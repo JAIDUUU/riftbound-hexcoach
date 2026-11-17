@@ -14,9 +14,10 @@ from typing import Protocol
 from langchain_core.tools import BaseTool
 from sqlalchemy import Connection, Engine
 
-from backend.agent.graph import ChatModel, Mentioned, OnEvent, Outcome, Turn
+from backend.agent.graph import ChatModel, OnEvent, Outcome
 from backend.agent.tracing import traced_run
 from backend.retrieval.repository import SearchHit
+from backend.turns import Mentioned, Turn
 
 RETRIEVAL_LIMIT = 8  # chunks per retrieval, the same as `backend ask`
 

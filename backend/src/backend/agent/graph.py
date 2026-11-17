@@ -39,6 +39,7 @@ from backend.agent.prompts import (
 )
 from backend.retrieval.precedence import order_by_precedence
 from backend.retrieval.repository import SearchHit
+from backend.turns import Mentioned, MentionedCard, MentionedDeck, Turn
 
 ChatModel = Runnable[LanguageModelInput, BaseMessage]
 Retriever = Callable[[str], Sequence[SearchHit]]
@@ -56,10 +57,6 @@ MAX_RETRIEVALS = 2  # the first attempt plus exactly one corrective retry
 MAX_TOOL_ROUNDS = 3  # lookup rounds per answer; after this the model answers with what it has
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
-
-Role = Literal["user", "assistant"]
-Turn = tuple[Role, str]
-"""One conversation turn, oldest first in a history."""
 
 Outcome = Literal["answered", "abstained"]
 """How a run ended: a judge-style answer, or a clarifying question / honest decline."""
@@ -96,26 +93,6 @@ class Token:
 
 AgentEvent = Started | Step | Token
 OnEvent = Callable[[AgentEvent], None]
-
-
-@dataclass(frozen=True, slots=True)
-class MentionedCard:
-    """A Card the player @-mentioned, with its full text."""
-
-    name: str
-    text: str  # name, type line and cleaned text, as lookup_card returns them
-
-
-@dataclass(frozen=True, slots=True)
-class MentionedDeck:
-    """A Deck the player @-mentioned, as card names only: no counts and no card text."""
-
-    name: str
-    sections: tuple[tuple[str, tuple[str, ...]], ...]  # (section, oracle names), in order
-
-
-Mentioned = MentionedCard | MentionedDeck
-"""What one @ mention puts into the turn's context (resolved by backend.mentions)."""
 
 
 class AgentState(TypedDict):

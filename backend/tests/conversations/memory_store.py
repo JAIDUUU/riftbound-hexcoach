@@ -8,7 +8,6 @@ import uuid
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
-from backend.agent.graph import Role, Turn
 from backend.conversations.limits import Limits
 from backend.conversations.store import (
     Conversation,
@@ -18,6 +17,7 @@ from backend.conversations.store import (
     Rating,
     UnscorableMessageError,
 )
+from backend.turns import Role, Turn
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
