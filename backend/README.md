@@ -153,6 +153,15 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   name and timestamp date all match, so each message has one score id and the backend
   resends the time feedback was first given: changing the vote replaces the score.
   Without Langfuse keys the vote is only stored.
+- `DELETE /account` deletes the signed-in user's own account (204, also when it is already
+  gone). It deletes the `auth.users` row over the backend's own database connection
+  (`backend/accounts.py`), so no Supabase service-role secret is needed. Supabase documents
+  deleting users directly, and its Admin API's hard delete runs the same `DELETE`. Supabase
+  Auth's identities and sessions (with their refresh tokens) cascade from the user, and so
+  do our conversations, messages and decks. The access token in hand stays valid until it
+  expires, so the frontend signs the user out afterwards; until then, reads return
+  nothing and writes fail. A Supabase Storage object owned by the user would block the
+  deletion; we don't use Storage. The confirmation step is the frontend's.
 - `GET /health` is public and reads one row from the database: `{"status": "ok"}`, or a
   503 when the database doesn't answer. The scheduled keep-alive workflow pings it so the
   free Supabase project doesn't pause.
@@ -267,6 +276,9 @@ a migration:
 - A new table needs `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`.
 - A new function in `public` needs `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC`: Postgres
   grants execute to everyone by default, and the Data API would expose it as an RPC.
+- Per-user data references `auth.users` (or a table that does) with `ON DELETE CASCADE`,
+  so account deletion takes it along. `tests/test_accounts.py` (integration) follows every
+  foreign key path to `auth.users` and fails on any link that doesn't cascade.
 
 `tests/test_data_api_lockdown.py` (integration) checks the whole schema, so run
 `pytest -m integration` before merging a migration.
@@ -288,6 +300,11 @@ trace id, and the message endpoint sends it in `start` and stores it with the an
 User ids are never sent raw — `backend.agent.tracing.hash_user_id` stores a SHA-256
 pseudonym — and the conversation id becomes the Langfuse session id. Without the keys,
 `ask` runs untraced and says so; nothing else changes.
+
+Privacy note (the same one as in the root README): traces contain message text, user ids
+are hashed, and players can delete conversations and their account. Deleting doesn't touch
+Langfuse: traces stay, linked only to the hashed id and the conversation id. Langfuse's
+trace retention on the free plan is **unverified** and is stated once checked.
 
 ## Tests
 
