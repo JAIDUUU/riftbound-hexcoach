@@ -35,6 +35,9 @@ Role = Literal["user", "assistant"]
 Turn = tuple[Role, str]
 """One conversation turn, oldest first in a history."""
 
+Outcome = Literal["answered", "abstained"]
+"""How a run ended: a judge-style answer, or a clarifying question / honest decline."""
+
 
 class AgentState(TypedDict):
     """The full state. Keys are filled in graph order; LangGraph merges partial updates,
@@ -50,7 +53,7 @@ class AgentState(TypedDict):
     grade: Literal["strong", "weak"]
     rewritten: bool  # did the grader supply a different query for the retry?
     answer: str
-    outcome: Literal["answered", "abstained"]
+    outcome: Outcome
 
 
 _Update = dict[str, Any]

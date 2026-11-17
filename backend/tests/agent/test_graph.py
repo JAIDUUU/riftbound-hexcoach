@@ -123,6 +123,19 @@ def test_weak_evidence_without_a_rewritten_query_abstains_instead_of_retrying() 
     assert len(retriever.queries) == 1
 
 
+def test_a_grader_echoing_the_current_query_counts_as_no_rewrite() -> None:
+    # Graders sometimes "rewrite" by repeating the query verbatim; retrying with it
+    # would fetch the same evidence, so it is treated like a missing rewrite.
+    retriever = RecordingRetriever({})
+    weak_echo = '{"grade": "weak", "rewritten_query": "score battlefield twice per turn"}'
+    llm = ScriptedLLM([PREPARE, weak_echo, "I cannot answer this confidently."])
+
+    state = run_agent(llm, retriever, "Can I?")
+
+    assert state["outcome"] == "abstained"
+    assert len(retriever.queries) == 1
+
+
 def test_non_english_questions_retrieve_in_english_and_answer_in_the_users_language() -> None:
     prepare_pt = '{"query": "Imperial Decree damage assignment", "language": "pt"}'
     retriever = RecordingRetriever(

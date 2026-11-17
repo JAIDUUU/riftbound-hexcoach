@@ -7,9 +7,9 @@ The Langfuse experiment wiring that feeds it real agent runs lives in langfuse_r
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
 
-from backend.evals.golden import GoldenItem
+from backend.agent.graph import Outcome
+from backend.evals.golden import Behaviour, GoldenItem
 
 # A rule id as answers cite them: three digits, then dotted alphanumeric segments. The
 # lookarounds keep years like 2026 from matching their inner digits, while a sentence
@@ -20,8 +20,8 @@ _RULE_CITATION = re.compile(r"(?<![\d.])(\d{3}(?:\.[0-9a-z]+)*)(?!\d)")
 @dataclass(frozen=True, slots=True)
 class AgentItemResult:
     item_id: str
-    behaviour: Literal["answer", "abstain"]
-    outcome: str
+    behaviour: Behaviour
+    outcome: Outcome
     behaviour_correct: bool
     expected: tuple[str, ...]
     cited: tuple[str, ...]
@@ -34,7 +34,7 @@ def cited_rules(answer: str) -> set[str]:
     return {match.rstrip(".") for match in _RULE_CITATION.findall(answer)}
 
 
-def evaluate_agent_item(item: GoldenItem, answer: str, outcome: str) -> AgentItemResult:
+def evaluate_agent_item(item: GoldenItem, answer: str, outcome: Outcome) -> AgentItemResult:
     """Score one run: did the outcome match the expected behaviour, citing what's expected?
 
     `citation_score` is the share of expected rule ids the answer actually cites; an
@@ -59,10 +59,12 @@ def evaluate_agent_item(item: GoldenItem, answer: str, outcome: str) -> AgentIte
     )
 
 
-def aggregate_citation_score(results: Sequence[AgentItemResult]) -> float:
+def aggregate_citation_score(results: Sequence[AgentItemResult]) -> float | None:
+    """Mean citation score over the items that have one; None when nothing was scored
+    (a golden set of only abstain items is odd but shouldn't crash a summary)."""
     scored = [r.citation_score for r in results if r.citation_score is not None]
     if not scored:
-        raise ValueError("no answer items with expected rules to aggregate")
+        return None
     return sum(scored) / len(scored)
 
 

@@ -6,14 +6,14 @@ from backend.evals.agent_eval import (
     cited_rules,
     evaluate_agent_item,
 )
-from backend.evals.golden import GoldenItem
+from backend.evals.golden import Behaviour, GoldenItem
 
 
-def _item(behaviour: str, expected_rules: tuple[str, ...]) -> GoldenItem:
+def _item(behaviour: Behaviour, expected_rules: tuple[str, ...]) -> GoldenItem:
     return GoldenItem(
         id="q",
         question="Can I?",
-        behaviour=behaviour,  # type: ignore[arg-type]
+        behaviour=behaviour,
         expected_rules=expected_rules,
         sources=(),
         lang="en",
@@ -84,8 +84,13 @@ def test_aggregates_cover_behaviour_and_citations() -> None:
     assert aggregate_citation_score(results) == 0.5  # (1.0 + 0.0) / 2 answer items
 
 
-def test_aggregating_nothing_is_an_error() -> None:
+def test_aggregating_no_behaviour_results_is_an_error() -> None:
     with pytest.raises(ValueError, match="no results"):
         aggregate_behaviour_accuracy([])
-    with pytest.raises(ValueError, match="no answer items"):
-        aggregate_citation_score([])
+
+
+def test_citation_aggregate_is_none_when_nothing_was_scored() -> None:
+    only_abstain = [evaluate_agent_item(_item("abstain", ()), "Which Diana?", "abstained")]
+
+    assert aggregate_citation_score(only_abstain) is None
+    assert aggregate_citation_score([]) is None

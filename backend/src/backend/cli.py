@@ -310,7 +310,9 @@ def _ask(args: argparse.Namespace) -> int:
 
 
 def _eval_agent(args: argparse.Namespace) -> int:
-    from backend.agent.tracing import traced_run
+    from langfuse.langchain import CallbackHandler
+
+    from backend.agent.graph import Outcome, run_agent
     from backend.db import make_engine
     from backend.evals.agent_eval import (
         aggregate_behaviour_accuracy,
@@ -335,8 +337,10 @@ def _eval_agent(args: argparse.Namespace) -> int:
                 connection, query, embedder().embed_query(query), limit=args.limit
             )
 
-        def ask(question: str) -> tuple[str, str]:
-            state, _ = traced_run(chain, retrieve, question)
+        def ask(question: str) -> tuple[str, Outcome]:
+            # run_experiment already opens a trace per item; adding traced_run's own
+            # "ask" span inside it would just nest a redundant wrapper.
+            state = run_agent(chain, retrieve, question, config={"callbacks": [CallbackHandler()]})
             return state["answer"], state["outcome"]
 
         results = run_agent_experiment(client, items, ask, args.run_name)
@@ -351,10 +355,11 @@ def _eval_agent(args: argparse.Namespace) -> int:
             else ""
         )
         print(f"{result.item_id}: behaviour {behaviour}{citation}")
+    citation_avg = aggregate_citation_score(results)
     print(
         f"Aggregate over {len(results)} items: behaviour accuracy "
         f"{aggregate_behaviour_accuracy(results):.2f}, citation score "
-        f"{aggregate_citation_score(results):.2f}"
+        f"{f'{citation_avg:.2f}' if citation_avg is not None else 'n/a'}"
     )
     return 0
 

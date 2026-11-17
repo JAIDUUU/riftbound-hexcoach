@@ -1,6 +1,6 @@
 import pytest
 
-from backend.evals.golden import GoldenItem
+from backend.evals.golden import Behaviour, GoldenItem
 from backend.evals.retrieval_eval import (
     aggregate_hit_rate,
     evaluate_retrieval,
@@ -8,11 +8,11 @@ from backend.evals.retrieval_eval import (
 )
 
 
-def _item(item_id: str, behaviour: str, expected_rules: tuple[str, ...]) -> GoldenItem:
+def _item(item_id: str, behaviour: Behaviour, expected_rules: tuple[str, ...]) -> GoldenItem:
     return GoldenItem(
         id=item_id,
         question=f"question {item_id}",
-        behaviour=behaviour,  # type: ignore[arg-type]
+        behaviour=behaviour,
         expected_rules=expected_rules,
         sources=(),
         lang="en",
