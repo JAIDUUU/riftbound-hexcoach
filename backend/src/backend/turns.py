@@ -7,12 +7,28 @@ resolver never depend on the LangGraph module, and the agent never depends on th
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 Role = Literal["user", "assistant"]
 Turn = tuple[Role, str]
 """One conversation turn, oldest first in a history."""
+
+
+def answered_turns(history: Sequence[Turn]) -> list[Turn]:
+    """The history without the questions that got no answer.
+
+    A run that fails keeps the player's question (they saw it sent) but stores no answer,
+    so a stored conversation can hold two user turns in a row. The model is only shown
+    questions together with the answer that followed them.
+    """
+    return [
+        turn
+        for i, turn in enumerate(history)
+        if turn[0] == "assistant" or (i + 1 < len(history) and history[i + 1][0] == "assistant")
+    ]
+
 
 MentionKind = Literal["card", "deck"]
 

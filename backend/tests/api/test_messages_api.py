@@ -260,20 +260,43 @@ def test_both_messages_are_stored_and_the_answer_keeps_its_announced_id_and_trac
 
 
 def test_the_coach_gets_the_question_and_the_capped_history_before_it() -> None:
-    store = InMemoryConversationStore(Limits(max_history_messages=2))
+    store = InMemoryConversationStore(Limits(max_history_messages=3))
     conversation = store.create(ALICE, None)
-    earlier: list[Turn] = [("user", "q1"), ("assistant", "a1"), ("user", "q2")]
+    earlier: list[Turn] = [("user", "q1"), ("assistant", "a1"), ("user", "q2"), ("assistant", "a2")]
     for role, content in earlier:
         store.add_message(ALICE, conversation.id, role, content)
-    coach = FakeCoach([Started(None)], Reply("a2", "answered", ()))
+    coach = FakeCoach([Started(None)], Reply("a3", "answered", ()))
 
     _ask(store, coach, "q3", conversation_id=conversation.id)
 
     [question] = coach.questions
     assert question.text == "q3"
-    assert question.history == (("assistant", "a1"), ("user", "q2"))
+    assert question.history == (("assistant", "a1"), ("user", "q2"), ("assistant", "a2"))
     assert question.user_id == ALICE
     assert question.conversation_id == conversation.id
+
+
+def test_questions_whose_run_failed_stay_stored_but_are_left_out_of_the_history(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    earlier: list[Turn] = [
+        ("user", "failed once"),
+        ("user", "q2"),
+        ("assistant", "a2"),
+        ("user", "failed again"),
+    ]
+    for role, content in earlier:
+        store.add_message(ALICE, conversation.id, role, content)
+    coach = FakeCoach([Started(None)], Reply("a3", "answered", ()))
+
+    _ask(store, coach, "q3", conversation_id=conversation.id)
+
+    [question] = coach.questions
+    assert question.history == (("user", "q2"), ("assistant", "a2"))
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None
+    assert [m.content for m in detail.messages][:4] == [content for _, content in earlier]
 
 
 def test_provider_exhaustion_ends_the_stream_with_a_typed_error_event(

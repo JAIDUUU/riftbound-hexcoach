@@ -17,7 +17,7 @@ from backend.api.dependencies import User, collaborators
 from backend.api.turn import PreparedTurn, stream_turn
 from backend.conversations.limits import TooManyMentionsError
 from backend.mentions import UnknownMentionError, resolve_mentions
-from backend.turns import Mention, Mentioned, MentionKind
+from backend.turns import Mention, Mentioned, MentionKind, answered_turns
 
 _log = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ def begin_turn(
         raise
     question = Question(
         text=body.content,
-        history=tuple(history),
+        history=tuple(answered_turns(history)),
         user_id=user.id,
         conversation_id=conversation_id,
         mentions=mentions,
