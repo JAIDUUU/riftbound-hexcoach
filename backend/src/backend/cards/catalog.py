@@ -1,8 +1,9 @@
 """Resolving player-written card names to Cards, and suggesting fixes for the ones that miss.
 
-One matcher for every caller: decklist import and the `lookup_card` tool both resolve by
-oracle name or alias (`find_by_oracle_name`) and suggest from the same alias-aware pool
-(`all_card_names`), so a suggestion is always a name that would resolve if picked.
+One matcher for every caller: decklist import, the `lookup_card` tool, Card tags and @
+mentions all resolve through a CardCatalog, by oracle name or alias (`find`) or by oracle
+id (`find_by_id`), and suggest from the same alias-aware pool (`all_names`), so a
+suggestion is always a name that would resolve if picked.
 """
 
 import difflib

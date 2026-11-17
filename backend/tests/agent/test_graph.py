@@ -1,4 +1,5 @@
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -21,9 +22,11 @@ from backend.agent.graph import (
     run_agent,
 )
 from backend.agent.tools import make_lookup_card
+from backend.cards.collapse import Card
 from backend.llm.providers import AllProvidersFailedError, ProviderChain
 from backend.retrieval.repository import SearchHit
 from backend.turns import MentionedCard, MentionedDeck, Turn
+from tests.cards.memory_catalog import InMemoryCardCatalog
 
 
 class ScriptedLLM(Runnable[LanguageModelInput, BaseMessage]):
@@ -267,26 +270,41 @@ def test_two_non_json_replies_are_a_clear_error() -> None:
         run_agent(llm, retriever, "Can I?")
 
 
-def _zhonyas_lookup(lookups: list[str]):
-    def find_card(name: str) -> str | None:
-        lookups.append(name)
-        if name.lower() == "zhonya's hourglass":
-            return "Zhonya's Hourglass (Gear)\nExhaust: a unit you control gains Deflect."
-        return None
+class RecordingCatalog(InMemoryCardCatalog):
+    """A catalog that records every name looked up in it."""
 
-    return make_lookup_card(find_card, lambda: ["Zhonya's Hourglass"])
+    def __init__(self, cards: Iterable[Card]) -> None:
+        super().__init__(cards)
+        self.lookups: list[str] = []
+
+    def find(self, name: str) -> Card | None:
+        self.lookups.append(name)
+        return super().find(name)
+
+
+@pytest.fixture
+def zhonyas(cards_by_name: dict[str, Card]) -> RecordingCatalog:
+    """A catalog holding one Gear, Zhonya's Hourglass."""
+    hourglass = replace(
+        cards_by_name["Pouty Poro"],
+        oracle_id="0e5a8a8c-5b7c-4a4e-9b56-2d3c4b5a6f70",
+        oracle_name="Zhonya's Hourglass",
+        card_type="Gear",
+        supertype=None,
+        cleaned_text="Exhaust: a unit you control gains Deflect.",
+    )
+    return RecordingCatalog([hourglass])
 
 
 def _tool_call(name: str, args: dict[str, Any], call_id: str = "call-1") -> AIMessage:
     return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])
 
 
-def test_the_answerer_can_look_a_card_up_and_use_its_text() -> None:
+def test_the_answerer_can_look_a_card_up_and_use_its_text(zhonyas: RecordingCatalog) -> None:
     retriever = RecordingRetriever(
         {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
     )
-    lookups: list[str] = []
-    tool = _zhonyas_lookup(lookups)
+    tool = make_lookup_card(zhonyas)
     llm = ScriptedLLM(
         [
             PREPARE,
@@ -298,7 +316,7 @@ def test_the_answerer_can_look_a_card_up_and_use_its_text() -> None:
 
     state = run_agent(llm, retriever, "Does Zhonya's stop the score?", tools=[tool])
 
-    assert lookups == ["Zhonya's Hourglass"]  # the tool hit the store, not model memory
+    assert zhonyas.lookups == ["Zhonya's Hourglass"]  # the tool hit the store, not memory
     assert llm.bound_tools == [tool]
     assert state["outcome"] == "answered"
     assert "Deflect" in state["answer"]
@@ -308,23 +326,26 @@ def test_the_answerer_can_look_a_card_up_and_use_its_text() -> None:
     assert "lookup_card" in llm.prompts[-2]
 
 
-def test_a_model_stuck_in_lookups_is_forced_to_answer_at_the_cap() -> None:
+def test_a_model_stuck_in_lookups_is_forced_to_answer_at_the_cap(
+    zhonyas: RecordingCatalog,
+) -> None:
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
-    lookups: list[str] = []
-    tool = _zhonyas_lookup(lookups)
+    tool = make_lookup_card(zhonyas)
     stuck = [_tool_call("lookup_card", {"name": "Zhonya's Hourglass"}, f"call-{n}") for n in "123"]
     llm = ScriptedLLM([PREPARE, STRONG, *stuck, "Fine: no, it only grants Deflect."])
 
     state = run_agent(llm, retriever, "Does Zhonya's stop it?", tools=[tool])
 
-    assert len(lookups) == 3  # one per round, then the cap
+    assert len(zhonyas.lookups) == 3  # one per round, then the cap
     assert state["answer"] == "Fine: no, it only grants Deflect."
     assert "information you already have" in llm.prompts[-1]  # the forced-answer nudge
 
 
-def test_a_hallucinated_tool_name_gets_a_corrective_tool_message() -> None:
+def test_a_hallucinated_tool_name_gets_a_corrective_tool_message(
+    zhonyas: RecordingCatalog,
+) -> None:
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
-    tool = _zhonyas_lookup([])
+    tool = make_lookup_card(zhonyas)
     llm = ScriptedLLM(
         [
             PREPARE,
@@ -360,14 +381,14 @@ class _RecordingCallbacks(BaseCallbackHandler):
         self.tool_starts.append(serialized.get("name", "?"))
 
 
-def test_tool_calls_reach_the_callbacks_passed_to_run_agent() -> None:
+def test_tool_calls_reach_the_callbacks_passed_to_run_agent(zhonyas: RecordingCatalog) -> None:
     # End to end: the handler given to run_agent (Langfuse, in production) sees the
     # tool run. This alone can't tell explicit config passing from langchain-core's
     # contextvar fallback; the next test pins the explicit hand-off.
     retriever = RecordingRetriever(
         {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
     )
-    tool = _zhonyas_lookup([])
+    tool = make_lookup_card(zhonyas)
     llm = ScriptedLLM(
         [PREPARE, STRONG, _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}), "No."]
     )
@@ -476,14 +497,14 @@ def test_provider_exhaustion_surfaces_from_a_streamed_run_as_is() -> None:
         run_agent(chain, RecordingRetriever({}), "Can I?", on_event=lambda event: None)
 
 
-def test_with_tools_the_grader_is_told_card_text_is_fixable() -> None:
+def test_with_tools_the_grader_is_told_card_text_is_fixable(zhonyas: RecordingCatalog) -> None:
     # Otherwise the grader marks card-text gaps weak and the run abstains before the
     # answer step - the only place the tool exists - ever gets a chance to use it.
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
     with_tools = ScriptedLLM([PREPARE, STRONG, "answer"])
     without_tools = ScriptedLLM([PREPARE, STRONG, "answer"])
 
-    run_agent(with_tools, retriever, "Can I?", tools=[_zhonyas_lookup([])])
+    run_agent(with_tools, retriever, "Can I?", tools=[make_lookup_card(zhonyas)])
     run_agent(without_tools, retriever, "Can I?")
 
     assert "NOT a reason to grade weak" in with_tools.prompts[1]  # the grade call
