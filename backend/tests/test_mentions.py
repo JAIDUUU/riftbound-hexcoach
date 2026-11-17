@@ -4,6 +4,7 @@ import pytest
 
 from backend.agent.graph import MentionedCard, MentionedDeck
 from backend.cards.collapse import Card
+from backend.decks.importing import DEFAULT_MAX_DECKLIST_CHARS
 from backend.mentions import Mention, UnknownMentionError, resolve_mentions
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.decks.memory_store import InMemoryDeckStore
@@ -98,3 +99,16 @@ def test_mentions_keep_request_order_and_a_repeated_one_comes_through_once(
     resolved = resolve_mentions([sona, annie, sona], ALICE, InMemoryDeckStore(), cards)
 
     assert [m.name for m in resolved] == ["Sona, Harmonious", "Annie, Dark Child"]
+
+
+def test_a_deck_saved_before_the_size_cap_was_lowered_can_still_be_mentioned(
+    cards: InMemoryCardCatalog,
+) -> None:
+    decks = InMemoryDeckStore()
+    long_ago = SONA_DECK + "\n" * DEFAULT_MAX_DECKLIST_CHARS
+    deck = decks.create(ALICE, "Sona ramp", long_ago)
+
+    [mentioned] = resolve_mentions([Mention("deck", deck.id)], ALICE, decks, cards)
+
+    assert isinstance(mentioned, MentionedDeck)
+    assert mentioned.name == "Sona ramp"
