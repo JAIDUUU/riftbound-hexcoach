@@ -2,7 +2,7 @@ import json
 import uuid
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -111,6 +111,18 @@ def _as(user: uuid.UUID) -> dict[str, str]:
     return {"Authorization": f"Bearer {mint(user)}"}
 
 
+def _post(
+    store: InMemoryConversationStore,
+    coach: FakeCoach,
+    conversation_id: uuid.UUID,
+    body: dict[str, Any],
+    headers: dict[str, str],
+):
+    return _client(store, coach).post(
+        f"/conversations/{conversation_id}/messages", json=body, headers=headers
+    )
+
+
 def _ask(
     store: InMemoryConversationStore,
     coach: FakeCoach,
@@ -121,9 +133,7 @@ def _ask(
 ) -> list[Event]:
     if conversation_id is None:
         conversation_id = store.create(ALICE, None).id
-    response = _client(store, coach).post(
-        f"/conversations/{conversation_id}/messages", json={"content": content}, headers=_as(user)
-    )
+    response = _post(store, coach, conversation_id, {"content": content}, _as(user))
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/event-stream")
     return parse_sse(response.text)
@@ -163,6 +173,27 @@ def test_a_successful_run_streams_start_status_token_and_final_in_order(
     assert final["outcome"] == "answered"
     assert final["cards"] == []
     assert [c["rule_id"] for c in final["citations"]] == ["472"]
+
+
+def test_final_cites_only_the_evidence_the_answer_names(
+    store: InMemoryConversationStore,
+) -> None:
+    uncited = replace(RULE_472, chunk_id=2, rule_id="315.2.b.2", text="Unrelated.")
+    coach = FakeCoach(A_FULL_RUN, Reply(ANSWER, "answered", (uncited, RULE_472)))
+
+    final = _ask(store, coach)[-1].data
+
+    assert final["citations"] == [
+        {
+            "source_type": "rules",
+            "rule_id": "472",
+            "title": None,
+            "section": "Scoring",
+            "source_date": "2026-10-09",
+            "source_url": None,
+            "text": "A player may only Score once per Battlefield per turn.",
+        }
+    ]
 
 
 def test_both_messages_are_stored_and_the_answer_keeps_its_announced_id_and_trace(
@@ -238,6 +269,53 @@ def test_a_failure_before_the_trace_exists_still_starts_with_start(
     assert [e.event for e in events] == ["start", "error"]
     assert events[0].data["trace_id"] is None
     uuid.UUID(events[0].data["message_id"])
+
+
+def test_someone_elses_conversation_is_a_plain_404_and_nothing_runs(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _post(store, coach, conversation.id, {"content": "hi"}, _as(BOB))
+
+    assert response.status_code == 404
+    assert coach.questions == []
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None
+    assert detail.messages == ()
+
+
+def test_a_message_over_the_cap_is_a_plain_422_before_any_stream_opens() -> None:
+    store = InMemoryConversationStore(Limits(max_message_chars=10))
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _post(store, coach, conversation.id, {"content": "x" * 11}, _as(ALICE))
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Message is 11 characters; the limit is 10."}
+    assert coach.questions == []
+
+
+def test_an_empty_message_is_refused(store: InMemoryConversationStore) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _post(store, coach, conversation.id, {"content": ""}, _as(ALICE))
+
+    assert response.status_code == 422
+    assert coach.questions == []
+
+
+def test_sending_a_message_needs_a_token(store: InMemoryConversationStore) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+
+    response = _post(store, coach, conversation.id, {"content": "hi"}, {})
+
+    assert response.status_code == 401
+    assert coach.questions == []
 
 
 def test_a_conversation_deleted_mid_answer_ends_with_an_error_not_a_final(

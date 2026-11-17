@@ -24,11 +24,11 @@ from typing import Literal
 from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel
 
+from backend.agent.citations import cited_evidence
 from backend.agent.coach import Coach, Question, Reply
 from backend.agent.graph import AgentEvent, Outcome, Started, Step, StepName, Token
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
-from backend.retrieval.precedence import order_by_precedence
 from backend.retrieval.repository import SearchHit, SourceType
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class PreparedTurn:
 
 
 def citations(reply: Reply) -> list[CitationOut]:
-    return [CitationOut.of(hit) for hit in order_by_precedence(reply.evidence)]
+    return [CitationOut.of(hit) for hit in cited_evidence(reply.answer, reply.evidence)]
 
 
 def validated_cards(answer: str) -> list[CardOut]:
