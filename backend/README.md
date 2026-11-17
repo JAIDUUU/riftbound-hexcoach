@@ -86,8 +86,8 @@ card names and rule quotes kept in English. Weak evidence gets exactly one corre
 retry with the grader's rewritten query; if the evidence is still weak the agent asks a
 clarifying question or honestly declines instead of guessing. Prompts live in
 `backend/agent/prompts.py` (and only there); the answer prompt states the source
-precedence. The graph takes message history as input, so the API can later run it fresh
-per request.
+precedence. The graph takes message history as input, so the message endpoint runs it
+fresh per request.
 
 While writing the answer the model can call the `lookup_card` tool (up to three rounds)
 to read any card's current text from the cards table by name or alias — real card text,
@@ -125,7 +125,8 @@ lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
 
 ### The HTTP API
 
-`serve` runs a FastAPI app (`backend/api/app.py`). Every endpoint needs the signed-in
+`serve` runs a FastAPI app (`backend/api/app.py`). It needs `DATABASE_URL`,
+`SUPABASE_URL` and at least one chat provider key at startup. Every endpoint needs the signed-in
 user's Supabase access token as `Authorization: Bearer <jwt>`. Tokens are verified
 against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, audience
 `authenticated`), so the backend holds no Supabase secret. Missing or bad tokens get a
@@ -141,6 +142,71 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   conversation store, the boundary every message write and every LLM-bound history read
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
+
+#### Sending a message (SSE)
+
+`POST /conversations/{id}/messages` with `{"content": "..."}` stores the player's
+message, runs the agent fresh on the conversation so far (the most recent
+`MAX_HISTORY_MESSAGES` messages), and streams the answer as server-sent events
+([ADR 0005](../docs/adr/0005-sse-streaming-and-final-event.md)). Refusals happen before
+the stream opens, so they are plain HTTP errors: 401 (token), 404 (not your
+conversation), 422 (empty or over the length cap). Once the response is a 200, the events are:
+
+| Event    | Data                                                  | When                                    |
+| -------- | ----------------------------------------------------- | --------------------------------------- |
+| `start`  | `message_id`, `trace_id` (null when untraced)         | always first                            |
+| `status` | `step`: `prepare`, `retrieve`, `grade`, `answer` or `abstain` | as each graph step begins; a corrective retry repeats `retrieve` and `grade` |
+| `token`  | `text`                                                | while the answer is written             |
+| `final`  | `text`, `outcome` (`answered`/`abstained`), `citations`, `cards` | last, on success                 |
+| `error`  | `code`, `message` (safe to show the player)           | last, on failure                        |
+
+`message_id` is the assistant message's id, and the answer is stored under it together with the
+trace id before `final` is sent, so feedback can be wired from the first event. Streamed tokens are a
+preview: if a provider fails halfway through a reply, the next provider starts over, so the client
+should replace the streamed text with `final.text`. `citations` are the retrieved chunks the
+answer actually cites (by rule number, FAQ title or card name), most authoritative source first,
+each with `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and `text`.
+`cards` is always empty for now (validated card tags arrive with issue #15). Error codes:
+`providers_unavailable` (every provider in the chain failed), `conversation_deleted` (deleted
+while the answer was being written) and `internal`. On an error the player's message stays
+stored and no answer is.
+
+```bash
+curl -N -X POST "http://127.0.0.1:8000/conversations/$CONVERSATION_ID/messages" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Can I score the same battlefield twice in one turn?"}'
+```
+
+```text
+event: start
+data: {"message_id":"51bcf7bb-8a7d-4e67-9be6-b0f99ffd9b0f","trace_id":"3f1c..."}
+
+event: status
+data: {"step":"prepare"}
+
+event: status
+data: {"step":"retrieve"}
+
+event: status
+data: {"step":"grade"}
+
+event: status
+data: {"step":"answer"}
+
+event: token
+data: {"text":"No"}
+
+event: token
+data: {"text":" - a battlefield scores once per turn (rule 472)."}
+
+event: final
+data: {"text":"No - a battlefield scores once per turn (rule 472).","outcome":"answered","citations":[{"source_type":"rules","rule_id":"472","title":null,"section":"Scoring","source_date":"2026-10-09","source_url":null,"text":"..."}],"cards":[]}
+```
+
+`-N` turns off curl's buffering so events print as they arrive. Idle stretches longer than 15
+seconds (a slow provider) get a `: ping` comment line, which SSE parsers ignore. Browsers can't
+use `EventSource` for a POST, so the frontend reads the stream with `fetch`.
 
 ### Supabase's Data API is closed
 
@@ -158,14 +224,17 @@ a migration:
 `tests/test_data_api_lockdown.py` (integration) checks the whole schema, so run
 `pytest -m integration` before merging a migration.
 
-Tests never call Supabase: tokens are signed with locally generated keys, and the API
-runs against an in-memory store that `tests/conversations/test_store_contract.py` holds to
-the same ownership rules as the Postgres store.
+Tests never call Supabase or an LLM: tokens are signed with locally generated keys, the
+API runs against an in-memory store that `tests/conversations/test_store_contract.py`
+holds to the same ownership rules as the Postgres store, and the message endpoint gets a
+scripted coach in place of the agent (`backend.agent.coach.Coach`). The agent's own
+streaming is tested with a fake chat model that streams word by word.
 
 ### Tracing
 
-When the `LANGFUSE_*` keys are set, every `ask` (and every `eval-agent` item) produces a
-Langfuse trace covering the graph steps and LLM calls, and the CLI prints the trace id.
+When the `LANGFUSE_*` keys are set, every `ask`, every chat message and every `eval-agent`
+item produces a Langfuse trace covering the graph steps and LLM calls; the CLI prints the
+trace id, and the message endpoint sends it in `start` and stores it with the answer.
 User ids are never sent raw — `backend.agent.tracing.hash_user_id` stores a SHA-256
 pseudonym — and the conversation id becomes the Langfuse session id. Without the keys,
 `ask` runs untraced and says so; nothing else changes.

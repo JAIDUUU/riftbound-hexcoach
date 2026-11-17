@@ -121,7 +121,8 @@ def validated_cards(answer: str) -> list[CardOut]:
 
 
 def run_turn(turn: PreparedTurn, coach: Coach, open_store: OpenStore, emit: Emit) -> None:
-    """Run the coach, store the answer and emit the turn's events; never raises."""
+    """Run the coach, store the answer and emit the turn's events; a failure becomes an
+    `error` event, since the stream is already a 200."""
     trace_id: str | None = None
     started = False
 
