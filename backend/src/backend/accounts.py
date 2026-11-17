@@ -1,11 +1,11 @@
 """Account deletion (issue #21): deleting the Supabase Auth user is the whole job.
 
 Everything the player owns hangs off `auth.users` with `ON DELETE CASCADE` (conversations
-and their messages, decks), and so do Supabase Auth's own rows (identities, sessions and
-through them refresh tokens, MFA factors). The backend's database role can delete from
-`auth.users` directly, which Supabase documents as supported; its Admin API's hard delete
-runs the same `DELETE` plus an audit-log entry. Doing it here keeps the backend free of a
-service-role secret.
+and their messages, decks, daily message counts), and so do Supabase Auth's own rows
+(identities, sessions and through them refresh tokens, MFA factors). The backend's
+database role can delete from `auth.users` directly, which Supabase documents as
+supported; its Admin API's hard delete runs the same `DELETE` plus an audit-log entry.
+Doing it here keeps the backend free of a service-role secret.
 
 Access tokens already issued stay valid until they expire: they are stateless JWTs.
 """

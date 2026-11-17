@@ -67,11 +67,19 @@ from backend.conversations.store import (
     SqlConversationStore,
     UnscorableMessageError,
 )
-from backend.decks.importing import DeckImport, import_decklist
+from backend.decks.importing import (
+    DEFAULT_MAX_DECKLIST_CHARS,
+    DeckImport,
+    DecklistTooLongError,
+    import_decklist,
+    max_decklist_chars_from_env,
+)
 from backend.decks.parse import SECTIONS, Section
 from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckStore
 from backend.decks.warnings import WarningKind
 from backend.mentions import Mention, MentionKind, UnknownMentionError, resolve_mentions
+from backend.quota.admission import MessageQuota, QuotaExceededError, quota_settings_from_env
+from backend.quota.store import SqlUsageStore, UsageStore
 
 _log = logging.getLogger(__name__)
 
@@ -89,6 +97,15 @@ class DeckAccess:
 
     decks: DeckStore
     cards: CardCatalog
+    max_decklist_chars: int = DEFAULT_MAX_DECKLIST_CHARS
+
+    def import_new(self, decklist: str) -> DeckImport:
+        """A decklist the player is sending now, held to the size cap."""
+        return import_decklist(decklist, self.cards, max_chars=self.max_decklist_chars)
+
+    def import_saved(self, deck: Deck) -> DeckImport:
+        """A deck already saved under the cap of its day, which may have been higher."""
+        return import_decklist(deck.decklist, self.cards, max_chars=None)
 
 
 OpenDecks = Callable[[], AbstractContextManager[DeckAccess]]
@@ -106,6 +123,7 @@ class _Collaborators:
     ping_database: PingDatabase | None
     open_cards: OpenCards | None
     limits: Limits
+    quota: MessageQuota | None
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -240,6 +258,15 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _reserve_slot(request: Request, user: AuthenticatedUser) -> Callable[[], None]:
+    """Take the message's slot in the player's limits (429 when full); returns the refund."""
+    quota = _collaborators(request).quota
+    if quota is None:
+        return lambda: None
+    reservation = quota.reserve(user.id)
+    return lambda: quota.refund(reservation)
+
+
 class MentionIn(BaseModel):
     """An @ mention: a Card by its oracle id (the client card index's `id`), or a Deck."""
 
@@ -276,15 +303,29 @@ def begin_turn(
 ) -> PreparedTurn:
     """Every check that can refuse a message, run before the event stream opens so a
     refusal is a plain HTTP error rather than an `error` event inside a 200: the
-    conversation must be the user's (404), the message must fit the cap (422) and its
-    mentions must resolve to Cards and the user's own Decks (422). The player's message
-    is committed here; the answer is stored when it is ready."""
-    with _collaborators(request).open_store() as store:
+    conversation must be the user's (404), the message must fit the cap (422), its
+    mentions must resolve to Cards and the user's own Decks (422), and only then must the
+    player be within their message limits (429), so a refused message never counts. The
+    player's message is committed here; the answer is stored when it is ready.
+
+    Each step is its own short transaction, one after another, so a request never holds
+    two pooled connections at once. If storing the message fails after the slot was
+    taken, the slot is refunded; a turn that later ends in `error` refunds it too."""
+    collaborators = _collaborators(request)
+    with collaborators.open_store() as store:
         history = store.history(user.id, conversation_id)
-        if history is None:
-            raise _not_found()
-        mentions = _mentioned(request, user.id, body.mentions)
-        store.add_message(user.id, conversation_id, "user", body.content)
+    if history is None:
+        raise _not_found()
+    collaborators.limits.check_message(body.content)
+    mentions = _mentioned(request, user.id, body.mentions)
+    refund = _reserve_slot(request, user)
+    try:
+        with collaborators.open_store() as store:
+            if store.add_message(user.id, conversation_id, "user", body.content) is None:
+                raise _not_found()  # deleted since its history was read
+    except BaseException:
+        refund()
+        raise
     question = Question(
         text=body.content,
         history=tuple(history),
@@ -292,7 +333,7 @@ def begin_turn(
         conversation_id=conversation_id,
         mentions=mentions,
     )
-    return PreparedTurn(question=question, answer_id=uuid.uuid4())
+    return PreparedTurn(question=question, answer_id=uuid.uuid4(), refund=refund)
 
 
 @router.post("/{conversation_id}/messages", response_class=EventSourceResponse)
@@ -437,12 +478,12 @@ decks_router = APIRouter(prefix="/decks")
 @decks_router.post("/preview")
 def preview_deck(body: DecklistIn, user: User, access: Decks) -> DeckImportOut:
     """Import validation without saving, for the Decks page's preview."""
-    return DeckImportOut.of(import_decklist(body.decklist, access.cards))
+    return DeckImportOut.of(access.import_new(body.decklist))
 
 
 @decks_router.post("", status_code=status.HTTP_201_CREATED)
 def create_deck(body: DeckIn, user: User, access: Decks) -> DeckOut:
-    imported = import_decklist(body.decklist, access.cards)
+    imported = access.import_new(body.decklist)
     return DeckOut.of_import(access.decks.create(user.id, body.name, body.decklist), imported)
 
 
@@ -456,12 +497,12 @@ def read_deck(deck_id: uuid.UUID, user: User, access: Decks) -> DeckOut:
     deck = access.decks.get(user.id, deck_id)
     if deck is None:
         raise _deck_not_found()
-    return DeckOut.of_import(deck, import_decklist(deck.decklist, access.cards))
+    return DeckOut.of_import(deck, access.import_saved(deck))
 
 
 @decks_router.put("/{deck_id}")
 def update_deck(deck_id: uuid.UUID, body: DeckIn, user: User, access: Decks) -> DeckOut:
-    imported = import_decklist(body.decklist, access.cards)
+    imported = access.import_new(body.decklist)
     deck = access.decks.update(user.id, deck_id, body.name, body.decklist)
     if deck is None:
         raise _deck_not_found()
@@ -507,9 +548,24 @@ def health(request: Request) -> HealthOut:
     return HealthOut(status="ok")
 
 
-def _message_too_long(request: Request, error: Exception) -> JSONResponse:
+def _too_long(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
+    )
+
+
+def _quota_exceeded(request: Request, error: Exception) -> JSONResponse:
+    # Retry-After is repeated in the body: a cross-origin fetch can't read the header
+    # unless CORS exposes it.
+    refusal = cast(QuotaExceededError, error)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": refusal.message,
+            "code": refusal.code,
+            "retry_after": refusal.retry_after,
+        },
+        headers={"Retry-After": str(refusal.retry_after)},
     )
 
 
@@ -525,13 +581,16 @@ def create_app(
     open_cards: OpenCards | None = None,
     cors_origins: Sequence[str] = (),
     limits: Limits | None = None,
+    quota: MessageQuota | None = None,
 ) -> FastAPI:
     """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored.
 
-    `ping_database` None means there is no database to check, and `open_cards` None means
-    no Card tag ever validates (tests of other endpoints).
-    `limits` holds the caps the API checks itself (mentions per message; the store
-    enforces the message and history caps); None means the defaults.
+    `ping_database` None means there is no database to check, `open_cards` None means
+    no Card tag ever validates, and `quota` None means messages are not limited per player
+    (tests of other endpoints).
+    `limits` holds the caps the API checks itself (message length and mentions, before a
+    message takes a quota slot; the store still enforces the message and history caps);
+    None means the defaults.
     """
     app = FastAPI(title="HexCoach API")
     # The frontend authenticates with a bearer header, never cookies, so no credentials mode.
@@ -551,10 +610,13 @@ def create_app(
         ping_database,
         open_cards,
         limits or Limits(),
+        quota,
     )
-    # App-wide: the cap is enforced in the store, so any endpoint that writes a player
-    # message gets a clear 422 rather than a 500.
-    app.add_exception_handler(MessageTooLongError, _message_too_long)
+    # App-wide: the caps are enforced in the store and in import_decklist, so any endpoint
+    # that takes a player message or decklist gets a clear 422 rather than a 500.
+    app.add_exception_handler(MessageTooLongError, _too_long)
+    app.add_exception_handler(DecklistTooLongError, _too_long)
+    app.add_exception_handler(QuotaExceededError, _quota_exceeded)
     app.include_router(router)
     app.include_router(decks_router)
     app.include_router(account_router)
@@ -572,6 +634,7 @@ def production_app() -> FastAPI:
 
     engine = make_engine()
     limits = limits_from_env()
+    max_decklist_chars = max_decklist_chars_from_env()
 
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
@@ -581,7 +644,14 @@ def production_app() -> FastAPI:
     @contextmanager
     def open_decks() -> Generator[DeckAccess]:
         with engine.begin() as connection:
-            yield DeckAccess(SqlDeckStore(connection), SqlCardCatalog(connection))
+            yield DeckAccess(
+                SqlDeckStore(connection), SqlCardCatalog(connection), max_decklist_chars
+            )
+
+    @contextmanager
+    def open_usage() -> Generator[UsageStore]:
+        with engine.begin() as connection:
+            yield SqlUsageStore(connection)
 
     @contextmanager
     def open_cards() -> Generator[CardCatalog]:
@@ -603,4 +673,5 @@ def production_app() -> FastAPI:
         open_cards=open_cards,
         cors_origins=cors_allowed_origins(),
         limits=limits,
+        quota=MessageQuota(quota_settings_from_env(), open_usage),
     )

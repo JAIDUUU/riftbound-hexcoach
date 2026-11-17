@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -25,6 +25,7 @@ from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
+from backend.quota.admission import MessageQuota, QuotaSettings
 from backend.retrieval.repository import SearchHit
 from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import FakeCoach
@@ -32,6 +33,8 @@ from tests.api.tokens import fake_verifier, mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import InMemoryDeckStore, no_decks
+from tests.quota.fake_clock import FakeClock
+from tests.quota.memory_usage import memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -89,6 +92,7 @@ def _client(
     open_decks: OpenDecks = no_decks,
     limits: Limits | None = None,
     cards: CardCatalog | None = None,
+    quota: MessageQuota | None = None,
 ) -> TestClient:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
@@ -107,6 +111,7 @@ def _client(
             delete_account=unused_account_deletion,
             open_cards=open_cards,
             limits=limits,
+            quota=quota,
         )
     )
 
@@ -122,8 +127,9 @@ def _post(
     body: dict[str, Any],
     headers: dict[str, str],
     cards: CardCatalog | None = None,
+    quota: MessageQuota | None = None,
 ):
-    return _client(store, coach, cards=cards).post(
+    return _client(store, coach, cards=cards, quota=quota).post(
         f"/conversations/{conversation_id}/messages", json=body, headers=headers
     )
 
@@ -384,6 +390,107 @@ def test_a_conversation_deleted_mid_answer_ends_with_an_error_not_a_final(
 
     assert events[-1].event == "error"
     assert events[-1].data["code"] == "conversation_deleted"
+
+
+EVENING = datetime(2026, 11, 17, 22, 30, tzinfo=UTC)  # 90 minutes before the UTC day ends
+
+
+def _quota(per_minute: int = 100, per_day: int = 100) -> MessageQuota:
+    settings = QuotaSettings(messages_per_minute=per_minute, messages_per_day=per_day)
+    return memory_quota(settings, FakeClock(EVENING))
+
+
+def _send(
+    store: InMemoryConversationStore,
+    coach: FakeCoach,
+    quota: MessageQuota,
+    conversation_id: uuid.UUID,
+    content: str = "Can I score twice?",
+):
+    return _post(store, coach, conversation_id, {"content": content}, _as(ALICE), quota=quota)
+
+
+def test_a_used_up_daily_quota_is_a_typed_429_before_any_stream_opens(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+    quota = _quota(per_day=1)
+    assert _send(store, coach, quota, conversation.id, "first").status_code == 200
+
+    response = _send(store, coach, quota, conversation.id, "second")
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == str(90 * 60)
+    body = response.json()
+    assert (body["code"], body["retry_after"]) == ("daily_quota_reached", 90 * 60)
+    assert "00:00 UTC" in body["detail"]
+    assert [q.text for q in coach.questions] == ["first"]
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None
+    assert [m.content for m in detail.messages if m.role == "user"] == ["first"]
+
+
+def test_a_burst_of_messages_is_throttled_with_a_typed_429(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
+    quota = _quota(per_minute=1)
+    _send(store, coach, quota, conversation.id)
+
+    response = _send(store, coach, quota, conversation.id)
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+    assert response.json()["code"] == "rate_limited"
+    assert len(coach.questions) == 1
+
+
+ANSWERED = Reply("a", "answered", ())
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status"),
+    [("not_their_conversation", 404), ("too_long", 422), ("empty", 422), ("bad_mention", 422)],
+)
+def test_a_refused_message_counts_against_neither_limit(refusal: str, status: int) -> None:
+    store = InMemoryConversationStore(Limits(max_message_chars=10))
+    mine, bobs = store.create(ALICE, None), store.create(BOB, None)
+    coach = FakeCoach([Started(None)], ANSWERED)
+    quota = _quota(per_minute=1, per_day=1)
+    unknown_card = {"kind": "card", "id": str(uuid.uuid4())}
+    target, body = {
+        "not_their_conversation": (bobs.id, {"content": "hi"}),
+        "too_long": (mine.id, {"content": "x" * 11}),
+        "empty": (mine.id, {"content": ""}),
+        "bad_mention": (mine.id, {"content": "hi", "mentions": [unknown_card]}),
+    }[refusal]
+    assert _post(store, coach, target, body, _as(ALICE), quota=quota).status_code == status
+
+    assert _send(store, coach, quota, mine.id, "ok?").status_code == 200
+
+
+@pytest.mark.parametrize("failure", ["providers_unavailable", "internal", "conversation_deleted"])
+def test_a_run_that_ends_in_an_error_counts_against_neither_limit(
+    store: InMemoryConversationStore, failure: str
+) -> None:
+    conversation = store.create(ALICE, None)
+    quota = _quota(per_minute=1, per_day=1)
+    failing = {
+        "providers_unavailable": FakeCoach(
+            [Started(None)], error=AllProvidersFailedError([("gemini", RuntimeError("429"))])
+        ),
+        "internal": FakeCoach([Started(None)], error=RuntimeError("boom")),
+        "conversation_deleted": FakeCoach(
+            [Started(None)], ANSWERED, during=lambda: store.delete(ALICE, conversation.id)
+        ),
+    }[failure]
+    events = parse_sse(_send(store, failing, quota, conversation.id).text)
+    assert events[-1].data["code"] == failure
+
+    again = store.create(ALICE, None)
+    assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
 
 
 SONA_ID = "f30de1e6-73f9-4b64-9211-791d0fc422e7"  # its `id` in data/cards/card-index.json

@@ -200,3 +200,53 @@ def test_a_deck_name_must_be_present_and_short(client: TestClient, name: str) ->
     response = client.post("/decks", json={"name": name, "decklist": ""}, headers=_as(ALICE))
 
     assert response.status_code == 422
+
+
+def _capped_client(decks: InMemoryDeckStore, max_chars: int) -> TestClient:
+    @contextmanager
+    def open_decks() -> Generator[DeckAccess]:
+        yield DeckAccess(decks, InMemoryCardCatalog([]), max_decklist_chars=max_chars)
+
+    @contextmanager
+    def no_conversations() -> Generator[InMemoryConversationStore]:
+        yield InMemoryConversationStore(Limits())
+
+    return TestClient(
+        create_app(
+            fake_verifier(),
+            no_conversations,
+            open_decks=open_decks,
+            coach=unused_coach,
+            delete_account=unused_account_deletion,
+        )
+    )
+
+
+def test_a_decklist_over_the_size_cap_is_a_plain_422_and_nothing_is_saved(
+    decks: InMemoryDeckStore,
+) -> None:
+    client = _capped_client(decks, max_chars=10)
+    saved = decks.create(ALICE, "Short", "Runes:")
+    too_long = "x" * 11
+    expected = {"detail": "Decklist is 11 characters; the limit is 10."}
+
+    preview = client.post("/decks/preview", json={"decklist": too_long}, headers=_as(ALICE))
+    create = client.post("/decks", json={"name": "Long", "decklist": too_long}, headers=_as(ALICE))
+    update = client.put(
+        f"/decks/{saved.id}", json={"name": "Long", "decklist": too_long}, headers=_as(ALICE)
+    )
+
+    assert [r.status_code for r in (preview, create, update)] == [422, 422, 422]
+    assert [r.json() for r in (preview, create, update)] == [expected] * 3
+    assert decks.list_for_user(ALICE) == [saved]
+
+
+def test_a_deck_saved_before_the_cap_was_lowered_can_still_be_read(
+    decks: InMemoryDeckStore,
+) -> None:
+    saved = decks.create(ALICE, "Old", "Runes:\n12 Fury Rune\n")
+
+    response = _capped_client(decks, max_chars=5).get(f"/decks/{saved.id}", headers=_as(ALICE))
+
+    assert response.status_code == 200
+    assert response.json()["decklist"] == "Runes:\n12 Fury Rune\n"

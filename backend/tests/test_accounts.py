@@ -45,7 +45,7 @@ def test_every_table_that_hangs_off_a_user_is_deleted_with_them(
 ) -> None:
     paths = db_connection.execute(_PATHS_TO_AUTH_USERS).all()
 
-    assert {"conversations", "messages", "decks"} <= {table for table, _, _ in paths}
+    assert {"conversations", "messages", "decks", "daily_usage"} <= {t for t, _, _ in paths}
     # 'c' is ON DELETE CASCADE. Anything else either blocks the deletion or leaves rows behind.
     assert [(table, name) for table, name, on_delete in paths if on_delete != "c"] == []
 

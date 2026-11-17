@@ -54,7 +54,7 @@ def _deck(
     if deck is None:
         raise UnknownMentionError(mention)
     names: dict[str, dict[str, None]] = {}  # section -> oracle names, both in first-seen order
-    for resolved in import_decklist(deck.decklist, cards).lines:
+    for resolved in import_decklist(deck.decklist, cards, max_chars=None).lines:
         if resolved.card is not None:
             names.setdefault(resolved.line.section, {})[resolved.card.oracle_name] = None
     return MentionedDeck(

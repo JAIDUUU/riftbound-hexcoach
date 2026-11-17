@@ -35,6 +35,27 @@ def optional_env(name: str) -> str | None:
     return os.environ.get(name, "").strip() or None
 
 
+def require_positive(label: str, value: int) -> int:
+    if value < 1:
+        raise ValueError(f"{label} must be positive, got {value}.")
+    return value
+
+
+def positive_int_env(name: str, default: int) -> int:
+    """A whole-number setting above zero, or `default` when unset."""
+    raw = optional_env(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise InvalidConfigError(f"{name} must be a whole number, got {raw!r}.") from None
+    try:
+        return require_positive(name, value)
+    except ValueError as error:
+        raise InvalidConfigError(str(error)) from None
+
+
 def supabase_url() -> str:
     """The Supabase project URL (https://<ref>.supabase.co); its JWKS verifies sign-ins."""
     url = optional_env("SUPABASE_URL")

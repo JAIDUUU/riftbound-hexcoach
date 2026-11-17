@@ -145,6 +145,7 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   conversation store, the boundary every message write and every LLM-bound history read
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
+- Message limits per player (see "Message limits" below) refuse a message with a 429.
 - `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
   records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
   The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
@@ -158,7 +159,7 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   (`backend/accounts.py`), so no Supabase service-role secret is needed. Supabase documents
   deleting users directly, and its Admin API's hard delete runs the same `DELETE`. Supabase
   Auth's identities and sessions (with their refresh tokens) cascade from the user, and so
-  do our conversations, messages and decks. The access token in hand stays valid until it
+  do our conversations, messages, decks and daily message counts. The access token in hand stays valid until it
   expires, so the frontend signs the user out afterwards; until then, reads return
   nothing and writes fail. A Supabase Storage object owned by the user would block the
   deletion; we don't use Storage. The confirmation step is the frontend's.
@@ -178,8 +179,8 @@ message, runs the agent fresh on the conversation so far (the most recent
 `MAX_HISTORY_MESSAGES` messages), and streams the answer as server-sent events
 ([ADR 0005](../docs/adr/0005-sse-streaming-and-final-event.md)). Refusals happen before
 the stream opens, so they are plain HTTP errors: 401 (token), 404 (not your
-conversation), 422 (empty or over the length cap, or a bad mention, below). Once the response
-is a 200, the events are:
+conversation), 422 (empty or over the length cap, or a bad mention, below), 429 (a message
+limit, below). Once the response is a 200, the events are:
 
 | Event    | Data                                                  | When                                    |
 | -------- | ----------------------------------------------------- | --------------------------------------- |
@@ -278,6 +279,54 @@ Rifthunt documents these URLs only on its per-card API objects, not in the bulk 
 all 1110 Cards on 2026-11-17. Stored answers carry no card data: `GET /conversations/{id}`
 returns the text with its tags, not validated cards.
 
+#### Message limits
+
+Each player's messages are limited to keep the free-tier demo alive
+(`backend/quota/admission.py`). The numbers are configuration, and the defaults are
+**unverified** placeholders until the free-tier limits of the providers and Supabase are
+checked:
+
+| Setting                | Default | What it limits                                            |
+| ---------------------- | ------- | --------------------------------------------------------- |
+| `MESSAGES_PER_MINUTE`  | 5       | messages in any sliding 60 seconds, per API process       |
+| `MESSAGES_PER_DAY`     | 50      | messages per UTC calendar day, across all processes       |
+| `MAX_MESSAGE_CHARS`    | 4000    | characters per message (422)                              |
+| `MAX_HISTORY_MESSAGES` | 20      | earlier messages sent to the LLM (older ones are dropped) |
+| `MAX_MENTIONS`         | 10      | @ mentions per message (422)                              |
+| `MAX_DECKLIST_CHARS`   | 4000    | characters per decklist (422)                             |
+
+The per-minute throttle is in memory, so it is per process and starts afresh on a restart.
+The daily count is in Postgres (`daily_usage`, migration 0011), one row per player per UTC
+day, so every quota resets at 00:00 UTC. Each limit is checked and taken in one step (under a
+lock for the throttle, in one SQL statement for the day), so two messages sent at once can't
+both take the last slot.
+
+What counts: only a message whose turn ends in `final`. On
+`POST /conversations/{id}/messages` the limits are checked last, after the token (401), the
+conversation (404), the length cap and the mentions (422), so a refused message never takes a
+slot. The slot it takes is refunded, in both limits, if the turn ends in an `error` event
+(`providers_unavailable`, `internal`, `conversation_deleted`) or the message can't be stored.
+A refund goes back to the UTC day the message was counted on. A player who disconnects
+mid-answer still uses their slot: the run carries on and stores the answer, which they find
+on their next visit. A 429 takes no slot in either limit. If the API process dies mid-run, the
+day's slot stays taken (and the minute's goes with the process).
+
+Each of these steps is its own short transaction, run one after another, so a message never
+holds two pooled connections at once.
+
+Over a limit, the response is a 429 with a `Retry-After` header (whole seconds) and a body
+the frontend can branch on:
+
+```json
+{"detail": "You've used all 50 of today's demo messages. The quota resets at 00:00 UTC.",
+ "code": "daily_quota_reached", "retry_after": 5400}
+```
+
+`code` is `daily_quota_reached` (show "demo quota reached"; `retry_after` runs to the next
+UTC midnight) or `rate_limited` (too many in a minute; usually a few seconds). `retry_after`
+is repeated in the body because a cross-origin `fetch` can't read `Retry-After` unless CORS
+exposes it.
+
 #### Decks
 
 Decks are per account, with the same ownership rules (someone else's deck is a 404):
@@ -291,6 +340,9 @@ Decks are per account, with the same ownership rules (someone else's deck is a 4
   suggestions, plus a list of typed warnings (`malformed_line`, `outside_section`,
   `unknown_section`, `unknown_card`, `section_size`, `copy_limit`). Warnings never block
   saving.
+- A decklist over `MAX_DECKLIST_CHARS` (default 4000, an unverified placeholder) is a 422
+  on preview, create and update, and nothing is saved. Reading a deck saved before the cap
+  was lowered still works.
 
 Decklists are parsed in code (`backend/decks/parse.py`), never by the LLM: one header per
 section (Legend, Champion, MainDeck, Battlefields, Runes, Sideboard) and `<count> <name>`
@@ -298,7 +350,7 @@ lines, where names can contain commas and colons. Only the text is stored. Valid
 recomputed from it on every read, so a card snapshot refresh is picked up. Cards resolve
 through the same oracle-name/alias matcher and alias-aware suggestions as `lookup_card`
 (`backend/cards/catalog.py`). `import_decklist` (`backend/decks/importing.py`) is the one
-entry point for every decklist, so checks on the decklist itself, such as a size cap, go
+entry point for every decklist, so checks on the decklist itself, such as the size cap, go
 there. The structural numbers (`backend/decks/construction.py`) are **unverified**
 placeholders read from the Core and Tournament Rules for constructed play: 1 Legend,
 1 Champion, a 40-card Main Deck counting the Champion, 3 unique Battlefields, 12 Runes, a

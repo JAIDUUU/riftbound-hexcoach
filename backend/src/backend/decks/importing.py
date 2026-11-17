@@ -2,7 +2,9 @@
 
 `import_decklist` is the one entry point every decklist goes through (preview, create and
 update alike), so a check on the decklist itself belongs here and nowhere else. Problems
-are warnings and never block the import: the player's text is saved as written.
+are warnings and never block the import: the player's text is saved as written. The one
+refusal is the size cap (`MAX_DECKLIST_CHARS`), an input cap against abuse rather than a
+deck problem.
 """
 
 from collections.abc import Sequence
@@ -10,11 +12,29 @@ from dataclasses import dataclass
 
 from backend.cards.catalog import CardCatalog, close_names
 from backend.cards.collapse import Card
+from backend.config import positive_int_env
 from backend.decks.construction import CONSTRUCTED, DeckRules
 from backend.decks.parse import DeckLine, Section, parse_decklist
 from backend.decks.warnings import DeckWarning
 
 _COPY_LIMITED: tuple[Section, ...] = ("Champion", "MainDeck", "Sideboard")
+
+# Placeholder until the free-tier limits are verified. A full constructed list with long
+# names is under 2500 characters; the cap bounds parsing and the per-line name matching.
+DEFAULT_MAX_DECKLIST_CHARS = 4000
+
+
+class DecklistTooLongError(ValueError):
+    """A decklist is over the configured size cap; unlike warnings, this refuses it."""
+
+    def __init__(self, length: int, cap: int) -> None:
+        self.length = length
+        self.cap = cap
+        super().__init__(f"Decklist is {length} characters; the limit is {cap}.")
+
+
+def max_decklist_chars_from_env() -> int:
+    return positive_int_env("MAX_DECKLIST_CHARS", DEFAULT_MAX_DECKLIST_CHARS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +138,17 @@ def _copy_limits(lines: Sequence[ResolvedLine], rules: DeckRules) -> list[DeckWa
     return warnings
 
 
-def import_decklist(text: str, cards: CardCatalog, rules: DeckRules = CONSTRUCTED) -> DeckImport:
+def import_decklist(
+    text: str,
+    cards: CardCatalog,
+    rules: DeckRules = CONSTRUCTED,
+    *,
+    max_chars: int | None = DEFAULT_MAX_DECKLIST_CHARS,
+) -> DeckImport:
+    """Raises DecklistTooLongError over `max_chars` (None: no cap, for text that was
+    already accepted when it was saved)."""
+    if max_chars is not None and len(text) > max_chars:
+        raise DecklistTooLongError(len(text), max_chars)
     parsed = parse_decklist(text)
     warnings = list(parsed.warnings)
     resolved: list[ResolvedLine] = []

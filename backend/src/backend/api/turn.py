@@ -9,6 +9,8 @@ first, even when the run fails before the trace exists.
 
 The answer is stored before `final` is sent, by the worker thread rather than the
 response, so a player who closes the tab still finds the answer on their next visit.
+That is also why a turn whose player disconnected still counts against their message
+limits: only a turn that ends in `error` refunds its slot (`PreparedTurn.refund`).
 """
 
 import logging
@@ -133,6 +135,7 @@ class ErrorData(BaseModel):
 class PreparedTurn:
     question: Question
     answer_id: uuid.UUID  # the assistant message's id, announced in `start`
+    refund: Callable[[], None] = lambda: None  # gives back the message's quota slot
 
 
 def citations(reply: Reply) -> list[CitationOut]:
@@ -186,6 +189,10 @@ def run_turn(
                 emit(ServerSentEvent(event="token", data=TokenData(text=text)))
 
     def fail(code: ErrorCode) -> None:
+        try:
+            turn.refund()  # before the error, so a retry it prompts finds the slot free
+        except Exception:
+            _log.exception("Could not refund the quota slot of a failed turn")
         if not started:
             start(None)
         emit(
