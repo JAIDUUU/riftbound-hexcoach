@@ -89,8 +89,9 @@ conversation returns 404, exactly like a conversation that doesn't exist.
 | --- | --- |
 | `POST /conversations` | Create a conversation (optional `title`, up to 200 characters). |
 | `GET /conversations` | List your conversations, most recently active first. |
-| `GET /conversations/{id}` | One conversation with its messages, oldest first, each with its trace id. |
+| `GET /conversations/{id}` | One conversation with its messages, oldest first, each with its trace id and your feedback. |
 | `DELETE /conversations/{id}` | Delete a conversation and its messages. |
+| `PUT /conversations/{id}/messages/{message_id}/feedback` | Give or change your thumbs up or down (`{"rating": "up"}` or `"down"`) on an answer. It is saved with the message and recorded as a Langfuse score on the answer's trace. |
 
 ### In progress
 
@@ -104,8 +105,6 @@ These endpoints are still being built, so their exact shapes may change:
 - Decks: create, list, read, update and delete your saved decklists, with import validation
   that flags unknown cards and structural problems
   ([#16](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/16)).
-- Feedback: a thumbs up or down on an assistant message, recorded as a Langfuse score on
-  that message's trace ([#19](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/19)).
 - Account deletion, which removes your conversations, messages and decks
   ([#21](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/21)).
 - A health check for deploys and the database keep-alive ping

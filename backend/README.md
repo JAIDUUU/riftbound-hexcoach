@@ -141,6 +141,14 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   conversation store, the boundary every message write and every LLM-bound history read
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
+- `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
+  records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
+  The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
+  shows it after a reload, and is sent to Langfuse as a `feedback` BOOLEAN score on the
+  answer's trace once the vote has committed. Langfuse replaces a score only when its id,
+  name and timestamp date all match, so each message has one score id and the backend
+  resends the time feedback was first given: changing the vote replaces the score.
+  Without Langfuse keys the vote is only stored.
 
 ### Supabase's Data API is closed
 
@@ -160,7 +168,7 @@ a migration:
 
 Tests never call Supabase: tokens are signed with locally generated keys, and the API
 runs against an in-memory store that `tests/conversations/test_store_contract.py` holds to
-the same ownership rules as the Postgres store.
+the same ownership and feedback rules as the Postgres store, and a fake Langfuse client.
 
 ### Tracing
 
