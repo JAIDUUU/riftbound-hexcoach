@@ -13,7 +13,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -190,6 +199,7 @@ def give_feedback(
     user: User,
     store: Store,
     scores: Scores,
+    after_response: BackgroundTasks,
 ) -> MessageOut:
     try:
         message = store.give_feedback(user.id, conversation_id, message_id, body.rating)
@@ -198,7 +208,10 @@ def give_feedback(
     if message is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
     if scores is not None and message.trace_id is not None and message.feedback is not None:
-        score_feedback(scores, message.id, message.trace_id, message.feedback)
+        # Runs after the store has committed, so Langfuse never gets a vote we lost.
+        after_response.add_task(
+            score_feedback, scores, message.id, message.trace_id, message.feedback
+        )
     return MessageOut.of(message)
 
 

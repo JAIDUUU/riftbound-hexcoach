@@ -150,6 +150,26 @@ def test_without_langfuse_the_vote_is_still_stored(store: InMemoryConversationSt
     assert _feedback_shown(client, answer.conversation_id) == [None, "down"]
 
 
+def test_a_vote_that_fails_to_commit_is_never_scored(
+    store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    @contextmanager
+    def failing_commit() -> Generator[ConversationStore]:
+        yield store
+        raise RuntimeError("commit failed")
+
+    client = TestClient(
+        create_app(fake_verifier(), failing_commit, scores=langfuse),
+        raise_server_exceptions=False,
+    )
+    answer = _answered(store)
+
+    response = _vote(client, answer.conversation_id, answer.message_id, "up")
+
+    assert response.status_code == 500
+    assert langfuse.scores == []
+
+
 def test_feedback_needs_a_token_and_a_thumbs_up_or_down(
     client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
 ) -> None:
