@@ -71,9 +71,11 @@ class ConversationStore(Protocol):
         role: Role,
         content: str,
         trace_id: str | None = None,
+        message_id: uuid.UUID | None = None,
     ) -> Message | None:
         """Append a message (player messages must fit the length cap); None if not the
-        user's conversation. Raises MessageTooLongError over the cap."""
+        user's conversation. Raises MessageTooLongError over the cap. `message_id` lets
+        the caller fix the id before the content exists; by default a new one is made."""
         ...
 
     def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
@@ -167,6 +169,7 @@ class SqlConversationStore:
         role: Role,
         content: str,
         trace_id: str | None = None,
+        message_id: uuid.UUID | None = None,
     ) -> Message | None:
         if role == "user":
             self.limits.check_message(content)
@@ -177,11 +180,15 @@ class SqlConversationStore:
         )
         if touched.rowcount == 0:
             return None
-        statement = (
-            insert(messages_table)
-            .values(conversation_id=conversation_id, role=role, content=content, trace_id=trace_id)
-            .returning(*_MESSAGE_COLUMNS)
-        )
+        values = {
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "trace_id": trace_id,
+        }
+        if message_id is not None:
+            values["id"] = message_id
+        statement = insert(messages_table).values(values).returning(*_MESSAGE_COLUMNS)
         return _message(self.connection.execute(statement).mappings().one())
 
     def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:

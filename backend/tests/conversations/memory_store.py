@@ -65,6 +65,7 @@ class InMemoryConversationStore:
         role: Role,
         content: str,
         trace_id: str | None = None,
+        message_id: uuid.UUID | None = None,
     ) -> Message | None:
         if role == "user":
             self.limits.check_message(content)
@@ -73,7 +74,11 @@ class InMemoryConversationStore:
             return None
         now = self._now()
         message = Message(
-            id=uuid.uuid4(), role=role, content=content, trace_id=trace_id, created_at=now
+            id=message_id or uuid.uuid4(),
+            role=role,
+            content=content,
+            trace_id=trace_id,
+            created_at=now,
         )
         row.messages.append(message)
         row.conversation = replace(row.conversation, updated_at=now)
