@@ -31,7 +31,7 @@ from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
 from backend.retrieval.repository import SearchHit, SourceType
 
-logger = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 OpenStore = Callable[[], AbstractContextManager[ConversationStore]]
 """Opens a store for one unit of work; leaving the context commits (or rolls back on error)."""
@@ -164,11 +164,11 @@ def run_turn(turn: PreparedTurn, coach: Coach, open_store: OpenStore, emit: Emit
                 message_id=turn.answer_id,
             )
     except AllProvidersFailedError as error:
-        logger.warning("Every chat provider failed: %s", error)
+        _log.warning("Every chat provider failed: %s", error)
         fail("providers_unavailable")
         return
     except Exception:
-        logger.exception("A chat turn failed")
+        _log.exception("A chat turn failed")
         fail("internal")
         return
     if saved is None:

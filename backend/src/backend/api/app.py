@@ -2,18 +2,23 @@
 chat and feedback.
 
 `create_app` takes its collaborators (the token verifier, a way to open a conversation
-store for one request, the coach that answers messages, and the Langfuse client feedback
-is scored with), so tests build the app with fake keys, an in-memory store, a scripted
-coach and a fake Langfuse; `production_app` wires Supabase's JWKS, Postgres, the real
-agent and Langfuse. Serve it with `uv run backend serve`.
+store for one request, the coach that answers messages, the Langfuse client feedback is
+scored with, and a database ping for `/health`), so tests build the app with fake keys,
+an in-memory store, a scripted coach and a fake Langfuse; `production_app` wires
+Supabase's JWKS, Postgres, the real agent, Langfuse and the CORS origins from the
+environment. Serve it with `uv run backend serve`.
+
+`/health` is public on purpose (issue #22): the scheduled keep-alive hits it so the free
+Supabase project sees a query and doesn't pause. It says only "ok" or 503.
 """
 
+import logging
 import uuid
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import (
     APIRouter,
@@ -25,6 +30,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -41,7 +47,7 @@ from backend.api.auth import (
     supabase_verifier,
 )
 from backend.api.turn import OpenStore, PreparedTurn, stream_turn
-from backend.config import supabase_url
+from backend.config import cors_allowed_origins, supabase_url
 from backend.conversations.limits import MAX_TITLE_CHARS, MessageTooLongError, limits_from_env
 from backend.conversations.store import (
     Conversation,
@@ -53,6 +59,11 @@ from backend.conversations.store import (
     UnscorableMessageError,
 )
 
+_log = logging.getLogger(__name__)
+
+PingDatabase = Callable[[], None]
+"""Runs one trivial query against the database; raises if it can't be reached."""
+
 
 @dataclass(frozen=True, slots=True)
 class _Collaborators:
@@ -60,6 +71,7 @@ class _Collaborators:
     open_store: OpenStore
     coach: Coach
     scores: ScoreClient | None
+    ping_database: PingDatabase | None
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -253,6 +265,28 @@ def give_feedback(
     return MessageOut.of(message)
 
 
+class HealthOut(BaseModel):
+    status: Literal["ok"]
+
+
+health_router = APIRouter()
+
+
+@health_router.get("/health")
+def health(request: Request) -> HealthOut:
+    """Unauthenticated, for the keep-alive ping: a query keeps the free Supabase project awake."""
+    ping_database = _collaborators(request).ping_database
+    if ping_database is not None:
+        try:
+            ping_database()
+        except Exception:
+            _log.exception("Health check: the database did not answer")
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "Database is unavailable"
+            ) from None
+    return HealthOut(status="ok")
+
+
 def _message_too_long(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
@@ -263,15 +297,29 @@ def create_app(
     verifier: TokenVerifier,
     open_store: OpenStore,
     coach: Coach,
+    *,
     scores: ScoreClient | None = None,
+    ping_database: PingDatabase | None = None,
+    cors_origins: Sequence[str] = (),
 ) -> FastAPI:
-    """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored."""
+    """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored.
+
+    `ping_database` None means there is no database to check (tests of other endpoints).
+    """
     app = FastAPI(title="HexCoach API")
-    app.state.collaborators = _Collaborators(verifier, open_store, coach, scores)
+    # The frontend authenticates with a bearer header, never cookies, so no credentials mode.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cors_origins),
+        allow_methods=["*"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+    app.state.collaborators = _Collaborators(verifier, open_store, coach, scores, ping_database)
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
     app.add_exception_handler(MessageTooLongError, _message_too_long)
     app.include_router(router)
+    app.include_router(health_router)
     return app
 
 
@@ -279,7 +327,7 @@ def production_app() -> FastAPI:
     """The API wired to Supabase Auth, Postgres and the provider chain (an ASGI factory
     for uvicorn)."""
     from backend.agent.coach import database_coach
-    from backend.db import make_engine
+    from backend.db import make_engine, ping_database
     from backend.llm.providers import chat_chain
 
     engine = make_engine()
@@ -290,5 +338,11 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield SqlConversationStore(connection, limits)
 
-    coach = database_coach(engine, chat_chain())
-    return create_app(supabase_verifier(supabase_url()), open_store, coach, langfuse_scores())
+    return create_app(
+        supabase_verifier(supabase_url()),
+        open_store,
+        database_coach(engine, chat_chain()),
+        scores=langfuse_scores(),
+        ping_database=lambda: ping_database(engine),
+        cors_origins=cors_allowed_origins(),
+    )
