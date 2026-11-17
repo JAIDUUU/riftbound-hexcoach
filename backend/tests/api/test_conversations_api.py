@@ -7,6 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.agent.coach import Question, Reply
+from backend.agent.graph import OnEvent
 from backend.api.app import Store, User, create_app
 from backend.api.auth import TokenVerifier
 from backend.conversations.limits import MAX_TITLE_CHARS, Limits
@@ -23,12 +25,16 @@ def store() -> InMemoryConversationStore:
     return InMemoryConversationStore(Limits())
 
 
+def _unused_coach(question: Question, on_event: OnEvent) -> Reply:
+    raise AssertionError("these tests never send a message")
+
+
 def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return create_app(verifier, open_store)
+    return create_app(verifier, open_store, _unused_coach)
 
 
 def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:

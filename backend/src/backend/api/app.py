@@ -1,14 +1,14 @@
-"""The HTTP API (issue #11): Supabase-authenticated conversations.
+"""The HTTP API (issues #11, #12): Supabase-authenticated conversations and chat.
 
-`create_app` takes its collaborators (the token verifier and a way to open a
-conversation store for one request), so tests build the app with fake keys and an
-in-memory store; `production_app` wires Supabase's JWKS and Postgres. Serve it with
-`uv run backend serve`.
+`create_app` takes its collaborators (the token verifier, a way to open a conversation
+store for one request, and the coach that answers messages), so tests build the app with
+fake keys, an in-memory store and a scripted coach; `production_app` wires Supabase's
+JWKS, Postgres and the real agent. Serve it with `uv run backend serve`.
 """
 
 import uuid
-from collections.abc import Callable, Generator
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, cast
@@ -16,8 +16,10 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
+from backend.agent.coach import Coach, Question
 from backend.agent.graph import Role
 from backend.api.auth import (
     AuthenticatedUser,
@@ -26,6 +28,7 @@ from backend.api.auth import (
     TokenVerifier,
     supabase_verifier,
 )
+from backend.api.turn import OpenStore, PreparedTurn, stream_turn
 from backend.config import supabase_url
 from backend.conversations.limits import MAX_TITLE_CHARS, MessageTooLongError, limits_from_env
 from backend.conversations.store import (
@@ -35,14 +38,12 @@ from backend.conversations.store import (
     SqlConversationStore,
 )
 
-OpenStore = Callable[[], AbstractContextManager[ConversationStore]]
-"""Opens a store for one request; leaving the context commits (or rolls back on error)."""
-
 
 @dataclass(frozen=True, slots=True)
 class _Collaborators:
     verifier: TokenVerifier
     open_store: OpenStore
+    coach: Coach
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -165,15 +166,50 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+class MessageIn(BaseModel):
+    """A player message. The length cap is configuration, enforced by the store."""
+
+    content: str = Field(min_length=1)
+
+
+def begin_turn(
+    conversation_id: uuid.UUID, body: MessageIn, user: User, request: Request
+) -> PreparedTurn:
+    """Every check that can refuse a message, run before the event stream opens so a
+    refusal is a plain HTTP error rather than an `error` event inside a 200: the
+    conversation must be the user's (404) and the message must fit the cap (422). The
+    player's message is committed here; the answer is stored when it is ready."""
+    with _collaborators(request).open_store() as store:
+        history = store.history(user.id, conversation_id)
+        if history is None:
+            raise _not_found()
+        store.add_message(user.id, conversation_id, "user", body.content)
+    question = Question(
+        text=body.content,
+        history=tuple(history),
+        user_id=user.id,
+        conversation_id=conversation_id,
+    )
+    return PreparedTurn(question=question, answer_id=uuid.uuid4())
+
+
+@router.post("/{conversation_id}/messages", response_class=EventSourceResponse)
+def post_message(
+    turn: Annotated[PreparedTurn, Depends(begin_turn)], request: Request
+) -> Iterator[ServerSentEvent]:
+    collaborators = _collaborators(request)
+    yield from stream_turn(turn, collaborators.coach, collaborators.open_store)
+
+
 def _message_too_long(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
     )
 
 
-def create_app(verifier: TokenVerifier, open_store: OpenStore) -> FastAPI:
+def create_app(verifier: TokenVerifier, open_store: OpenStore, coach: Coach) -> FastAPI:
     app = FastAPI(title="HexCoach API")
-    app.state.collaborators = _Collaborators(verifier, open_store)
+    app.state.collaborators = _Collaborators(verifier, open_store, coach)
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
     app.add_exception_handler(MessageTooLongError, _message_too_long)
@@ -182,8 +218,11 @@ def create_app(verifier: TokenVerifier, open_store: OpenStore) -> FastAPI:
 
 
 def production_app() -> FastAPI:
-    """The API wired to Supabase Auth and Postgres (an ASGI factory for uvicorn)."""
+    """The API wired to Supabase Auth, Postgres and the provider chain (an ASGI factory
+    for uvicorn)."""
+    from backend.agent.coach import database_coach
     from backend.db import make_engine
+    from backend.llm.providers import chat_chain
 
     engine = make_engine()
     limits = limits_from_env()
@@ -193,4 +232,5 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield SqlConversationStore(connection, limits)
 
-    return create_app(supabase_verifier(supabase_url()), open_store)
+    coach = database_coach(engine, chat_chain())
+    return create_app(supabase_verifier(supabase_url()), open_store, coach)
