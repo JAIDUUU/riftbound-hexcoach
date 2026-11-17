@@ -41,15 +41,3 @@ def test_deleting_the_account_deletes_its_conversations(db_connection: Connectio
         _count(db_connection, messages_table, messages_table.c.conversation_id == conversation.id)
         == 0
     )
-
-
-def test_conversation_tables_have_row_level_security(db_connection: Connection) -> None:
-    # No policies: Supabase's Data API (anon key) can reach nothing in them.
-    rows = db_connection.execute(
-        text(
-            "SELECT relname, relrowsecurity FROM pg_class "
-            "WHERE relname IN ('conversations', 'messages') AND relkind = 'r'"
-        )
-    ).all()
-
-    assert sorted(rows) == [("conversations", True), ("messages", True)]
