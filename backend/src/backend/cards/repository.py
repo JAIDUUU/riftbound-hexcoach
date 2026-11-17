@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import Any
 
-from sqlalchemy import Connection, delete, select, text
+from sqlalchemy import Connection, delete, text
 from sqlalchemy.dialects.postgresql import insert
 
 from backend.cards.collapse import Card
@@ -65,7 +65,16 @@ def find_by_oracle_name(connection: Connection, name: str) -> Card | None:
     return _card_from_row(dict(row)) if row else None
 
 
+_ALL_NAMES = text(
+    """
+    SELECT oracle_name AS name FROM cards
+    UNION
+    SELECT unnest(aliases) FROM cards
+    """
+)
+
+
 def all_card_names(connection: Connection) -> list[str]:
-    """Every oracle name, for close-match suggestions when a lookup finds nothing."""
-    rows = connection.execute(select(cards_table.c.oracle_name)).scalars()
-    return [str(name) for name in rows]
+    """Every name a lookup would match - oracle names and aliases - so close-match
+    suggestions can point at whichever spelling the player was reaching for."""
+    return [str(name) for name in connection.execute(_ALL_NAMES).scalars()]

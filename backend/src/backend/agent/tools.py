@@ -15,7 +15,7 @@ FindCard = Callable[[str], str | None]
 """Formatted card text (name, type line, cleaned text) by name or alias, or None."""
 
 AllCardNames = Callable[[], Sequence[str]]
-"""Every oracle name, for close-match suggestions."""
+"""Every name a lookup would match (oracle names and aliases), for suggestions."""
 
 _MAX_SUGGESTIONS = 3
 

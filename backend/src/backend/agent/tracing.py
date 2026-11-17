@@ -28,6 +28,22 @@ def tracing_enabled() -> bool:
     )
 
 
+def run_in_open_trace(
+    llm: ChatModel,
+    retrieve: Retriever,
+    question: str,
+    tools: Sequence[BaseTool] = (),
+) -> AgentState:
+    """Run the agent under a trace someone else already opened (e.g. a Langfuse
+    experiment item), recording steps and LLM calls without traced_run's own ask span.
+    Requires Langfuse keys; keyless callers want run_agent or traced_run instead."""
+    from langfuse.langchain import CallbackHandler
+
+    return run_agent(
+        llm, retrieve, question, config={"callbacks": [CallbackHandler()]}, tools=tools
+    )
+
+
 def traced_run(
     llm: ChatModel,
     retrieve: Retriever,

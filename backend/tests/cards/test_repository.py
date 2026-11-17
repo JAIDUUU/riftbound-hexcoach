@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import Connection, func, select
 
 from backend.cards.collapse import collapse_printings
-from backend.cards.repository import find_by_oracle_name, sync_cards
+from backend.cards.repository import all_card_names, find_by_oracle_name, sync_cards
 from backend.cards.rifthunt import RifthuntSnapshot
 from backend.cards.schema import cards_table
 
@@ -46,6 +46,17 @@ def test_an_unknown_name_finds_nothing(
     sync_cards(db_connection, collapse_printings(rifthunt_sample))
 
     assert find_by_oracle_name(db_connection, "Not A Real Card") is None
+
+
+def test_all_card_names_carries_oracle_names_and_aliases(
+    db_connection: Connection, rifthunt_sample: RifthuntSnapshot
+) -> None:
+    sync_cards(db_connection, collapse_printings(rifthunt_sample))
+
+    names = all_card_names(db_connection)
+
+    assert "Recruit" in names  # oracle name
+    assert "Recruit (NX)" in names  # alias: a lookup would match it, so suggest it too
 
 
 def test_syncing_twice_is_idempotent_and_keeps_every_field(

@@ -3,6 +3,7 @@ from datetime import date
 from typing import Any
 
 import pytest
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -299,6 +300,33 @@ def test_without_tools_the_answer_prompt_does_not_mention_lookup_card() -> None:
     run_agent(llm, retriever, "Can I?")
 
     assert "lookup_card" not in llm.prompts[-1]
+
+
+class _RecordingCallbacks(BaseCallbackHandler):
+    """Records which tools ran, standing in for the Langfuse handler."""
+
+    def __init__(self) -> None:
+        self.tool_starts: list[str] = []
+
+    def on_tool_start(self, serialized: dict[str, Any], input_str: str, **kwargs: Any) -> None:
+        self.tool_starts.append(serialized.get("name", "?"))
+
+
+def test_tool_calls_reach_the_callbacks_passed_to_run_agent() -> None:
+    # "Each lookup_card call is traced" is a documented guarantee: the config must be
+    # threaded to tool.invoke explicitly, not left to implicit contextvar propagation.
+    retriever = RecordingRetriever(
+        {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
+    )
+    tool = _zhonyas_lookup([])
+    llm = ScriptedLLM(
+        [PREPARE, STRONG, _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}), "No."]
+    )
+    callbacks = _RecordingCallbacks()
+
+    run_agent(llm, retriever, "Can I?", config={"callbacks": [callbacks]}, tools=[tool])
+
+    assert callbacks.tool_starts == ["lookup_card"]
 
 
 def test_with_tools_the_grader_is_told_card_text_is_fixable() -> None:

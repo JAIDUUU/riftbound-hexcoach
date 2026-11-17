@@ -6,11 +6,12 @@ task, keep the typed result locally, and hand Langfuse a JSON-friendly output di
 the evaluators turn into per-item scores.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 from langfuse import Evaluation, Langfuse
 from langfuse.api import DatasetItem
+from langfuse.experiment import EvaluatorFunction
 
 from backend.agent.graph import Outcome
 from backend.config import MissingConfigError, optional_env
@@ -29,7 +30,6 @@ AskFunction = Callable[[str], tuple[str, Outcome]]
 DATASET_NAME = "hexcoach-golden"
 
 _Output = dict[str, Any]
-_Evaluator = Callable[..., list[Evaluation]]
 
 
 def langfuse_client() -> Langfuse:
@@ -62,16 +62,16 @@ def upload_golden_set(client: Langfuse, items: Sequence[GoldenItem]) -> None:
 def _run_golden_experiment[R](
     client: Langfuse,
     items: Sequence[GoldenItem],
-    scored: Mapping[str, GoldenItem],
     *,
     name: str,
     run_name: str,
     description: str,
     run_item: Callable[[GoldenItem], tuple[R, _Output]],
-    evaluators: Sequence[_Evaluator],
+    evaluators: Sequence[EvaluatorFunction],
     run_evaluator: Callable[[Sequence[R]], list[Evaluation]] | None = None,
+    include: Callable[[GoldenItem], bool] = lambda item: True,
 ) -> list[R]:
-    """Run every item in `scored` through `run_item` as a Langfuse experiment.
+    """Run every golden item passing `include` through `run_item` as a Langfuse experiment.
 
     Results are kept locally (typed) and returned in golden-set order; the dict half of
     `run_item`'s return is what Langfuse stores as the item's output and what the
@@ -79,6 +79,7 @@ def _run_golden_experiment[R](
     aggregate scores. max_concurrency stays 1: tasks share one DB connection and one
     provider chain.
     """
+    scored = {item.id: item for item in items if include(item)}
     results: dict[str, R] = {}
 
     def task(*, item: Any, **_: Any) -> _Output:
@@ -132,12 +133,12 @@ def run_experiment(
     return _run_golden_experiment(
         client,
         items,
-        {item.id: item for item in items if item.behaviour == "answer"},
         name="retrieval",
         run_name=run_name,
         description="Share of expected Core Rules ids surfaced by keyword search.",
         run_item=run_item,
         evaluators=[hit_rate],
+        include=lambda item: item.behaviour == "answer",
     )
 
 
@@ -184,7 +185,6 @@ def run_agent_experiment(
     return _run_golden_experiment(
         client,
         items,
-        {item.id: item for item in items},
         name="agent",
         run_name=run_name,
         description="Full agent runs: citation match and abstain correctness.",

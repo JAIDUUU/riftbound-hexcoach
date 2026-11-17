@@ -5,7 +5,9 @@ _CARDS = {
     "zhonya's hourglass": "Zhonya's Hourglass (Gear)\nExhaust: a unit gains Deflect.",
 }
 
-_NAMES = ["Diana, Lunari", "Zhonya's Hourglass", "Imperial Decree"]
+# The suggestion pool carries every name a lookup would match: oracle names and aliases
+# (all_card_names in cards/repository.py), so alias near-misses also get suggestions.
+_NAMES = ["Diana, Lunari", "Zhonya's Hourglass", "Imperial Decree", "Zhonyas"]
 
 
 def _find(name: str) -> str | None:
@@ -36,6 +38,13 @@ def test_an_unknown_name_suggests_close_names_in_their_original_casing() -> None
     assert "No card named 'diana lunary'" in result
     assert "Diana, Lunari" in result
     assert "call lookup_card again" in result
+
+
+def test_an_alias_near_miss_is_suggested_too() -> None:
+    result = _tool().invoke({"name": "zhonias"})
+
+    assert "No card named 'zhonias'" in result
+    assert "Zhonyas" in result  # the alias, which a retried lookup would match
 
 
 def test_a_name_unlike_anything_says_so_and_forbids_invention() -> None:

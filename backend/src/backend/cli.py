@@ -328,9 +328,8 @@ def _ask(args: argparse.Namespace) -> int:
 
 
 def _eval_agent(args: argparse.Namespace) -> int:
-    from langfuse.langchain import CallbackHandler
-
-    from backend.agent.graph import Outcome, run_agent
+    from backend.agent.graph import Outcome
+    from backend.agent.tracing import run_in_open_trace
     from backend.db import make_engine
     from backend.evals.agent_eval import (
         aggregate_behaviour_accuracy,
@@ -360,13 +359,7 @@ def _eval_agent(args: argparse.Namespace) -> int:
         def ask(question: str) -> tuple[str, Outcome]:
             # run_experiment already opens a trace per item; adding traced_run's own
             # "ask" span inside it would just nest a redundant wrapper.
-            state = run_agent(
-                chain,
-                retrieve,
-                question,
-                config={"callbacks": [CallbackHandler()]},
-                tools=[lookup],
-            )
+            state = run_in_open_trace(chain, retrieve, question, tools=[lookup])
             return state["answer"], state["outcome"]
 
         results = run_agent_experiment(client, items, ask, args.run_name)

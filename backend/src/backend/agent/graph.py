@@ -147,7 +147,7 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
     else:
         answer_model = llm
 
-    def run_tool(call: ToolCall) -> BaseMessage:
+    def run_tool(call: ToolCall, config: RunnableConfig) -> BaseMessage:
         tool = tool_by_name.get(call["name"])
         if tool is None:
             known = ", ".join(sorted(tool_by_name))
@@ -155,8 +155,10 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
                 content=f"Unknown tool {call['name']!r}; the only tools are: {known}.",
                 tool_call_id=call["id"] or "",
             )
-        # Invoking a tool with the ToolCall itself yields the matching ToolMessage.
-        return cast(BaseMessage, tool.invoke(call))
+        # Invoking a tool with the ToolCall itself yields the matching ToolMessage. The
+        # config is passed explicitly so every call is traced (a documented guarantee),
+        # not left to langchain-core's implicit contextvar propagation.
+        return cast(BaseMessage, tool.invoke(call, config))
 
     def prepare(state: AgentState) -> _Update:
         reply = _json_call(llm, PREPARE_PROMPT, _conversation(state))
@@ -205,18 +207,19 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
         system = system_template.format(language=state["language"]) + extra_system
         return [SystemMessage(system), HumanMessage(prompt)]
 
-    def answer(state: AgentState) -> _Update:
+    def answer(state: AgentState, config: RunnableConfig) -> _Update:
         extra = f"\n\n{TOOLS_NOTE}" if tools else ""
         messages = respond_messages(state, ANSWER_PROMPT, "Evidence", extra)
         for _ in range(MAX_TOOL_ROUNDS):
-            reply = answer_model.invoke(messages)
+            reply = answer_model.invoke(messages, config)
             if not isinstance(reply, AIMessage) or not reply.tool_calls:
                 return {"answer": reply.text, "outcome": "answered"}
             messages.append(reply)
-            messages.extend(run_tool(call) for call in reply.tool_calls)
+            messages.extend(run_tool(call, config) for call in reply.tool_calls)
         # Still asking for lookups at the cap: force an answer from what it has.
         final = llm.invoke(
-            [*messages, HumanMessage("Answer now using only the information you already have.")]
+            [*messages, HumanMessage("Answer now using only the information you already have.")],
+            config,
         )
         return {"answer": final.text, "outcome": "answered"}
 
