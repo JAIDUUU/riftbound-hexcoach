@@ -391,29 +391,50 @@ def test_a_burst_of_messages_is_throttled_with_a_typed_429(
     assert len(coach.questions) == 1
 
 
-def test_a_message_refused_for_its_length_still_counts_against_the_quota() -> None:
+ANSWERED = Reply("a", "answered", ())
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status"),
+    [("not_their_conversation", 404), ("too_long", 422), ("empty", 422), ("bad_mention", 422)],
+)
+def test_a_refused_message_counts_against_neither_limit(refusal: str, status: int) -> None:
     store = InMemoryConversationStore(Limits(max_message_chars=10))
-    conversation = store.create(ALICE, None)
-    coach = FakeCoach([Started(None)], Reply("a", "answered", ()))
-    quota = _quota(per_day=1)
-    assert _send(store, coach, quota, conversation.id, "x" * 11).status_code == 422
+    mine, bobs = store.create(ALICE, None), store.create(BOB, None)
+    coach = FakeCoach([Started(None)], ANSWERED)
+    quota = _quota(per_minute=1, per_day=1)
+    unknown_card = {"kind": "card", "id": str(uuid.uuid4())}
+    target, body = {
+        "not_their_conversation": (bobs.id, {"content": "hi"}),
+        "too_long": (mine.id, {"content": "x" * 11}),
+        "empty": (mine.id, {"content": ""}),
+        "bad_mention": (mine.id, {"content": "hi", "mentions": [unknown_card]}),
+    }[refusal]
+    assert _post(store, coach, target, body, _as(ALICE), quota).status_code == status
 
-    assert _send(store, coach, quota, conversation.id, "short").status_code == 429
+    assert _send(store, coach, quota, mine.id, "ok?").status_code == 200
 
 
-def test_a_run_that_fails_still_counts_against_the_quota(
-    store: InMemoryConversationStore,
+@pytest.mark.parametrize("failure", ["providers_unavailable", "internal", "conversation_deleted"])
+def test_a_run_that_ends_in_an_error_counts_against_neither_limit(
+    store: InMemoryConversationStore, failure: str
 ) -> None:
     conversation = store.create(ALICE, None)
-    exhausted = AllProvidersFailedError([("gemini", RuntimeError("429"))])
-    quota = _quota(per_day=1)
-    _send(store, FakeCoach([Started(None)], error=exhausted), quota, conversation.id)
+    quota = _quota(per_minute=1, per_day=1)
+    failing = {
+        "providers_unavailable": FakeCoach(
+            [Started(None)], error=AllProvidersFailedError([("gemini", RuntimeError("429"))])
+        ),
+        "internal": FakeCoach([Started(None)], error=RuntimeError("boom")),
+        "conversation_deleted": FakeCoach(
+            [Started(None)], ANSWERED, during=lambda: store.delete(ALICE, conversation.id)
+        ),
+    }[failure]
+    events = parse_sse(_send(store, failing, quota, conversation.id).text)
+    assert events[-1].data["code"] == failure
 
-    retry = _send(
-        store, FakeCoach([Started(None)], Reply("a", "answered", ())), quota, conversation.id
-    )
-
-    assert retry.status_code == 429
+    again = store.create(ALICE, None)
+    assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
 
 
 SONA_ID = "f30de1e6-73f9-4b64-9211-791d0fc422e7"  # its `id` in data/cards/card-index.json

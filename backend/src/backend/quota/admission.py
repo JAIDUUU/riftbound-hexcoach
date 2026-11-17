@@ -1,6 +1,11 @@
 """Whether a player may send another message right now: a per-minute throttle, then a
 daily quota.
 
+Only answered messages count. A message reserves a slot in both limits once every other
+pre-run check has passed, and the slot is refunded if the turn doesn't end in an answer
+(see `begin_turn` and `run_turn`), so refused messages and failed runs cost the player
+nothing.
+
 The throttle is in memory and per process: a burst is refused without touching the
 database, and a restart (or a second process) starts it afresh. That is enough to stop
 a runaway client; the daily quota is the real budget, and it lives in Postgres
@@ -18,7 +23,7 @@ from collections import deque
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 
 from backend.config import positive_int_env, require_positive
@@ -65,6 +70,19 @@ def quota_settings_from_env() -> QuotaSettings:
     )
 
 
+@dataclass(eq=False, slots=True)
+class Reservation:
+    """One message's slot in both limits, held until its turn ends."""
+
+    user_id: uuid.UUID
+    at: datetime  # UTC; the minute slot it holds, and so the day it was counted on
+    refunded: bool = False
+
+    @property
+    def day(self) -> date:
+        return self.at.date()
+
+
 def _seconds_until(moment: datetime, now: datetime) -> int:
     return max(1, math.ceil((moment - now).total_seconds()))
 
@@ -83,13 +101,23 @@ class MessageQuota:
         self._lock = threading.Lock()
         self._recent: dict[uuid.UUID, deque[datetime]] = {}
 
-    def admit(self, user_id: uuid.UUID) -> None:
-        """Count one message for the player, or raise QuotaExceededError."""
+    def reserve(self, user_id: uuid.UUID) -> Reservation:
+        """Take a slot for one message, or raise QuotaExceededError having taken none.
+
+        Each limit is checked and taken in one step (under a lock, and in one SQL
+        statement), so two messages sent at once can't both take the last slot.
+        """
         now = self.clock().astimezone(UTC)
-        self._throttle(user_id, now)
-        with self.open_usage() as usage:
-            counted = usage.consume(user_id, now.date(), self.settings.messages_per_day)
+        reservation = Reservation(user_id, now)
+        self._take_minute_slot(reservation)
+        try:
+            with self.open_usage() as usage:
+                counted = usage.consume(user_id, now.date(), self.settings.messages_per_day)
+        except BaseException:
+            self._free_minute_slot(reservation)
+            raise
         if counted is None:
+            self._free_minute_slot(reservation)
             midnight = datetime.combine(now.date() + timedelta(days=1), time(), UTC)
             raise QuotaExceededError(
                 "daily_quota_reached",
@@ -97,10 +125,23 @@ class MessageQuota:
                 f"You've used all {self.settings.messages_per_day} of today's demo messages."
                 " The quota resets at 00:00 UTC.",
             )
+        return reservation
 
-    def _throttle(self, user_id: uuid.UUID, now: datetime) -> None:
+    def refund(self, reservation: Reservation) -> None:
+        """Give the message's slots back (its turn didn't end in an answer). Only the
+        first refund of a reservation does anything."""
         with self._lock:
-            recent = self._recent.setdefault(user_id, deque())
+            if reservation.refunded:
+                return
+            reservation.refunded = True
+        self._free_minute_slot(reservation)
+        with self.open_usage() as usage:
+            usage.release(reservation.user_id, reservation.day)
+
+    def _take_minute_slot(self, reservation: Reservation) -> None:
+        now = reservation.at
+        with self._lock:
+            recent = self._recent.setdefault(reservation.user_id, deque())
             while recent and recent[0] <= now - _MINUTE:
                 recent.popleft()
             if len(recent) >= self.settings.messages_per_minute:
@@ -110,3 +151,9 @@ class MessageQuota:
                     "You're sending messages too quickly. Please wait a moment.",
                 )
             recent.append(now)
+
+    def _free_minute_slot(self, reservation: Reservation) -> None:
+        with self._lock:
+            recent = self._recent.get(reservation.user_id)
+            if recent is not None and reservation.at in recent:
+                recent.remove(reservation.at)  # already gone if its minute has passed

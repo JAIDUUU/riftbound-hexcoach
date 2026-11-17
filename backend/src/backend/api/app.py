@@ -256,12 +256,13 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _count_against_quota(request: Request, user: AuthenticatedUser) -> None:
-    """First, so a refused player costs no database work beyond the counter. Anything
-    admitted counts, even a message then refused as 404 or 422 or a run that fails."""
+def _reserve_slot(request: Request, user: AuthenticatedUser) -> Callable[[], None]:
+    """Take the message's slot in the player's limits (429 when full); returns the refund."""
     quota = _collaborators(request).quota
-    if quota is not None:
-        quota.admit(user.id)
+    if quota is None:
+        return lambda: None
+    reservation = quota.reserve(user.id)
+    return lambda: quota.refund(reservation)
 
 
 class MentionIn(BaseModel):
@@ -299,18 +300,30 @@ def begin_turn(
     conversation_id: uuid.UUID, body: MessageIn, user: User, request: Request
 ) -> PreparedTurn:
     """Every check that can refuse a message, run before the event stream opens so a
-    refusal is a plain HTTP error rather than an `error` event inside a 200: the player
-    must be within their message limits (429), the conversation must be the user's (404),
-    the message must fit the cap (422) and its mentions must resolve to Cards and the
-    user's own Decks (422). The player's message is committed here; the answer is stored
-    when it is ready."""
-    _count_against_quota(request, user)
-    with _collaborators(request).open_store() as store:
+    refusal is a plain HTTP error rather than an `error` event inside a 200: the
+    conversation must be the user's (404), the message must fit the cap (422), its
+    mentions must resolve to Cards and the user's own Decks (422), and only then must the
+    player be within their message limits (429), so a refused message never counts. The
+    player's message is committed here; the answer is stored when it is ready.
+
+    Each step is its own short transaction, one after another, so a request never holds
+    two pooled connections at once. If storing the message fails after the slot was
+    taken, the slot is refunded; a turn that later ends in `error` refunds it too."""
+    collaborators = _collaborators(request)
+    with collaborators.open_store() as store:
         history = store.history(user.id, conversation_id)
-        if history is None:
-            raise _not_found()
-        mentions = _mentioned(request, user.id, body.mentions)
-        store.add_message(user.id, conversation_id, "user", body.content)
+    if history is None:
+        raise _not_found()
+    collaborators.limits.check_message(body.content)
+    mentions = _mentioned(request, user.id, body.mentions)
+    refund = _reserve_slot(request, user)
+    try:
+        with collaborators.open_store() as store:
+            if store.add_message(user.id, conversation_id, "user", body.content) is None:
+                raise _not_found()  # deleted since its history was read
+    except BaseException:
+        refund()
+        raise
     question = Question(
         text=body.content,
         history=tuple(history),
@@ -318,7 +331,7 @@ def begin_turn(
         conversation_id=conversation_id,
         mentions=mentions,
     )
-    return PreparedTurn(question=question, answer_id=uuid.uuid4())
+    return PreparedTurn(question=question, answer_id=uuid.uuid4(), refund=refund)
 
 
 @router.post("/{conversation_id}/messages", response_class=EventSourceResponse)
@@ -569,8 +582,9 @@ def create_app(
 
     `ping_database` None means there is no database to check (tests of other endpoints),
     and `quota` None means messages are not limited per player (likewise).
-    `limits` holds the caps the API checks itself (mentions per message; the store
-    enforces the message and history caps); None means the defaults.
+    `limits` holds the caps the API checks itself (message length and mentions, before a
+    message takes a quota slot; the store still enforces the message and history caps);
+    None means the defaults.
     """
     app = FastAPI(title="HexCoach API")
     # The frontend authenticates with a bearer header, never cookies, so no credentials mode.
