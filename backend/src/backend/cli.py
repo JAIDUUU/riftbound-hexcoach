@@ -269,6 +269,19 @@ def _eval_retrieval(args: argparse.Namespace) -> int:
     return 0
 
 
+def _serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    uvicorn.run(
+        "backend.api.app:production_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
+    return 0
+
+
 def _ping(args: argparse.Namespace) -> int:
     from backend.llm.providers import chat_chain
 
@@ -430,6 +443,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the embedding model and use full-text search alone",
     )
+    server = add("serve", _serve, "Run the HTTP API (Supabase-authenticated conversations).")
+    server.add_argument("--host", default="127.0.0.1", help="Interface to bind")
+    server.add_argument("--port", type=int, default=8000, help="Port to listen on")
+    server.add_argument("--reload", action="store_true", help="Restart on code changes (dev)")
     pinger = add("ping", _ping, "Send one raw prompt through the provider chain (smoke test).")
     pinger.add_argument("prompt", nargs="+", help="The prompt to send")
     asker = add("ask", _ask, "Answer a rules question judge-style, with citations.")

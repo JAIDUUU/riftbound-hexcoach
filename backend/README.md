@@ -35,6 +35,7 @@ uv run backend ingest-faqs     # chunk + embed the FAQ files in data/FAQs into t
 uv run backend search <query>  # hybrid keyword+vector search across the chunks (-k for more hits)
 uv run backend ask <question>  # answer a rules question judge-style, with citations (any language)
 uv run backend ping <prompt>   # smoke-test the LLM provider fallback chain with one raw prompt
+uv run backend serve           # run the HTTP API on 127.0.0.1:8000 (--host/--port/--reload)
 uv run backend check-golden    # validate data/golden/golden-set.yaml
 uv run backend eval-retrieval --run-name <name>  # score retrieval on the golden set via Langfuse
 uv run backend eval-agent --run-name <name>      # run the full agent on the golden set via Langfuse
@@ -121,6 +122,29 @@ records two scores per item in the Langfuse run — `behaviour_correct` (did it 
 it should answer and abstain when it should abstain) and, for `answer` items,
 `citation_score` (the share of expected rule ids actually cited in the answer). Scoring
 lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
+
+### The HTTP API
+
+`serve` runs a FastAPI app (`backend/api/app.py`). Every endpoint needs the signed-in
+user's Supabase access token as `Authorization: Bearer <jwt>`. Tokens are verified
+against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, audience
+`authenticated`), so the backend holds no Supabase secret. Missing or bad tokens get a
+401; a JWKS outage gets a 503.
+
+- `POST /conversations` (optional `title`, at most 200 characters), `GET /conversations`
+  (most recently active first), `GET /conversations/{id}` (with messages, oldest first,
+  each carrying its trace id), `DELETE /conversations/{id}`.
+- Someone else's conversation is a plain 404, the same as one that doesn't exist.
+- Deleting a conversation cascades to its messages; deleting the Supabase account
+  cascades to its conversations. Both tables have row level security on with no
+  policies, so Supabase's Data API can't reach them; the backend connects as the owner.
+- Input caps (`MAX_MESSAGE_CHARS`, default 4000; `MAX_HISTORY_MESSAGES`, default 20) are
+  enforced in the conversation store, the boundary every message write and every
+  LLM-bound history read goes through.
+
+Tests never call Supabase: tokens are signed with locally generated keys, and the API
+runs against an in-memory store that `tests/conversations/test_store_contract.py` holds to
+the same ownership rules as the Postgres store.
 
 ### Tracing
 

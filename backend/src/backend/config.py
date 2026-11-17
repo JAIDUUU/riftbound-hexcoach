@@ -31,6 +31,14 @@ def optional_env(name: str) -> str | None:
     return os.environ.get(name, "").strip() or None
 
 
+def supabase_url() -> str:
+    """The Supabase project URL (https://<ref>.supabase.co); its JWKS verifies sign-ins."""
+    url = optional_env("SUPABASE_URL")
+    if url is None:
+        raise MissingConfigError("SUPABASE_URL is not set (see backend/.env.example).")
+    return url
+
+
 def database_url() -> str:
     url = optional_env("DATABASE_URL")
     if url is None:
