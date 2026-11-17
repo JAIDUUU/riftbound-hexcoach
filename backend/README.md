@@ -142,6 +142,14 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   conversation store, the boundary every message write and every LLM-bound history read
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
+- `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
+  records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
+  The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
+  shows it after a reload, and is sent to Langfuse as a `feedback` BOOLEAN score on the
+  answer's trace once the vote has committed. Langfuse replaces a score only when its id,
+  name and timestamp date all match, so each message has one score id and the backend
+  resends the time feedback was first given: changing the vote replaces the score.
+  Without Langfuse keys the vote is only stored.
 
 #### Sending a message (SSE)
 
@@ -161,7 +169,8 @@ conversation), 422 (empty or over the length cap). Once the response is a 200, t
 | `error`  | `code`, `message` (safe to show the player)           | last, on failure                        |
 
 `message_id` is the assistant message's id, and the answer is stored under it together with the
-trace id before `final` is sent, so feedback can be wired from the first event. Streamed tokens are a
+trace id just before `final` is sent, so the feedback endpoint above accepts a vote on it once
+`final` has arrived (earlier it is a 404). Streamed tokens are a
 preview: if a provider fails halfway through a reply, the next provider starts over, so the client
 should replace the streamed text with `final.text`. `citations` are the retrieved chunks the
 answer actually cites (by rule number, FAQ title or card name), most authoritative source first,
@@ -224,11 +233,12 @@ a migration:
 `tests/test_data_api_lockdown.py` (integration) checks the whole schema, so run
 `pytest -m integration` before merging a migration.
 
-Tests never call Supabase or an LLM: tokens are signed with locally generated keys, the
-API runs against an in-memory store that `tests/conversations/test_store_contract.py`
-holds to the same ownership rules as the Postgres store, and the message endpoint gets a
-scripted coach in place of the agent (`backend.agent.coach.Coach`). The agent's own
-streaming is tested with a fake chat model that streams word by word.
+Tests never call Supabase, Langfuse or an LLM: tokens are signed with locally generated
+keys, the API runs against an in-memory store that
+`tests/conversations/test_store_contract.py` holds to the same ownership and feedback
+rules as the Postgres store, feedback scores go to a fake Langfuse client, and the message
+endpoint gets a scripted coach in place of the agent (`backend.agent.coach.Coach`). The
+agent's own streaming is tested with a fake chat model that streams word by word.
 
 ### Tracing
 

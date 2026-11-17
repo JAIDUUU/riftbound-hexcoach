@@ -10,13 +10,14 @@ every LLM-bound history read goes through.
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 from sqlalchemy import (
     ColumnElement,
     Connection,
     RowMapping,
     delete,
+    exists,
     func,
     insert,
     select,
@@ -36,6 +37,24 @@ class Conversation:
     updated_at: datetime
 
 
+Rating = Literal["up", "down"]
+
+
+class UnscorableMessageError(ValueError):
+    """Feedback is scored on an answer's trace, so only traced answers can receive it."""
+
+    def __init__(self) -> None:
+        super().__init__("Only answers with a trace can receive feedback.")
+
+
+@dataclass(frozen=True, slots=True)
+class Feedback:
+    """The player's thumbs up/down on an answer."""
+
+    rating: Rating
+    given_at: datetime  # when feedback was first given; changing the rating keeps it
+
+
 @dataclass(frozen=True, slots=True)
 class Message:
     id: uuid.UUID
@@ -43,6 +62,7 @@ class Message:
     content: str
     trace_id: str | None
     created_at: datetime
+    feedback: Feedback | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +102,18 @@ class ConversationStore(Protocol):
         """The most recent turns for the LLM, oldest first, capped at the history limit."""
         ...
 
+    def give_feedback(
+        self,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        message_id: uuid.UUID,
+        rating: Rating,
+    ) -> Message | None:
+        """Set (or change) the player's rating on an answer; None if the message is not in
+        one of the user's conversations. Raises UnscorableMessageError unless the message is
+        an assistant message with a trace id."""
+        ...
+
 
 _CONVERSATION_COLUMNS = (
     conversations_table.c.id,
@@ -95,6 +127,8 @@ _MESSAGE_COLUMNS = (
     messages_table.c.content,
     messages_table.c.trace_id,
     messages_table.c.created_at,
+    messages_table.c.feedback,
+    messages_table.c.feedback_given_at,
 )
 
 
@@ -105,12 +139,17 @@ def _conversation(row: RowMapping) -> Conversation:
 
 
 def _message(row: RowMapping) -> Message:
+    feedback = None
+    if row["feedback"] is not None:
+        # ck_messages_feedback guarantees the rating, and that given_at is set with it
+        feedback = Feedback(rating=cast(Rating, row["feedback"]), given_at=row["feedback_given_at"])
     return Message(
         id=row["id"],
         role=cast(Role, row["role"]),  # the ck_messages_role constraint guarantees it
         content=row["content"],
         trace_id=row["trace_id"],
         created_at=row["created_at"],
+        feedback=feedback,
     )
 
 
@@ -203,3 +242,35 @@ class SqlConversationStore:
         )
         rows = list(self.connection.execute(recent).mappings())
         return [(cast(Role, row["role"]), str(row["content"])) for row in reversed(rows)]
+
+    def give_feedback(
+        self,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        message_id: uuid.UUID,
+        rating: Rating,
+    ) -> Message | None:
+        target = (
+            (messages_table.c.id == message_id)
+            & (messages_table.c.conversation_id == conversation_id)
+            & exists().where(_owned(user_id, conversation_id))
+        )
+        statement = (
+            update(messages_table)
+            .where(
+                target, messages_table.c.role == "assistant", messages_table.c.trace_id.is_not(None)
+            )
+            .values(
+                feedback=rating,
+                feedback_given_at=func.coalesce(
+                    messages_table.c.feedback_given_at, func.clock_timestamp()
+                ),
+            )
+            .returning(*_MESSAGE_COLUMNS)
+        )
+        row = self.connection.execute(statement).mappings().first()
+        if row is not None:
+            return _message(row)
+        if self.connection.execute(select(messages_table.c.id).where(target)).first() is not None:
+            raise UnscorableMessageError
+        return None

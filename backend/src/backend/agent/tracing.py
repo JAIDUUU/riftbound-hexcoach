@@ -1,14 +1,17 @@
-"""Langfuse tracing around agent runs (issue #9).
+"""Langfuse tracing around agent runs (issue #9), and feedback scores on those traces (#19).
 
 `traced_run` wraps `run_agent` in a Langfuse trace: the LangChain callback captures the
 graph steps and every LLM call as spans, the user id is stored hashed, the conversation
 id becomes the Langfuse session id, and the trace id is returned so feedback can be
-scored on it later. Without Langfuse keys it degrades to a plain untraced run, so tests
-and CI never need credentials.
+scored on it later (`score_feedback`). Without Langfuse keys it degrades to a plain
+untraced run, so tests and CI never need credentials.
 """
 
 import hashlib
+import uuid
 from collections.abc import Sequence
+from datetime import datetime
+from typing import Literal, Protocol
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -23,6 +26,7 @@ from backend.agent.graph import (
     run_agent,
 )
 from backend.config import optional_env
+from backend.conversations.store import Feedback
 
 
 def hash_user_id(user_id: str) -> str:
@@ -105,3 +109,47 @@ def traced_run(
         span.update(output={"outcome": state["outcome"], "answer": state["answer"]})
     langfuse.flush()
     return state, trace_id
+
+
+class ScoreClient(Protocol):
+    """The part of the Langfuse client that feedback uses; tests pass a fake."""
+
+    def create_score(
+        self,
+        *,
+        name: str,
+        value: float,
+        trace_id: str | None = None,
+        score_id: str | None = None,
+        data_type: Literal["BOOLEAN"] | None = None,
+        timestamp: datetime | None = None,
+    ) -> None: ...
+
+
+def langfuse_scores() -> ScoreClient | None:
+    """The Langfuse client for feedback scores; None without keys (feedback is then only
+    stored, not scored)."""
+    if not tracing_enabled():
+        return None
+    from langfuse import get_client
+
+    return get_client()
+
+
+def score_feedback(
+    client: ScoreClient, message_id: uuid.UUID, trace_id: str, feedback: Feedback
+) -> None:
+    """Send the player's feedback on an answer as a score on that answer's trace.
+
+    Langfuse overwrites a score only when its id, name and timestamp date all match, so
+    the id comes from the message and the timestamp is when feedback was first given:
+    a changed vote replaces the score rather than adding a second one.
+    """
+    client.create_score(
+        name="feedback",
+        value=1.0 if feedback.rating == "up" else 0.0,
+        trace_id=trace_id,
+        score_id=f"feedback-{message_id}",
+        data_type="BOOLEAN",
+        timestamp=feedback.given_at,
+    )

@@ -1,6 +1,6 @@
 import json
 import uuid
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date
@@ -9,13 +9,14 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.agent.coach import Question, Reply
-from backend.agent.graph import AgentEvent, OnEvent, Started, Step, Token, Turn
+from backend.agent.coach import Reply
+from backend.agent.graph import AgentEvent, Started, Step, Token, Turn
 from backend.api.app import create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
 from backend.retrieval.repository import SearchHit
+from tests.api.coaches import FakeCoach
 from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
 
@@ -33,37 +34,6 @@ RULE_472 = SearchHit(
     title=None,
     source_url=None,
 )
-
-
-class FakeCoach:
-    """Stands in for the agent graph: replays scripted events, then replies or fails.
-
-    `during` runs mid-answer, for things that happen while the model is still writing.
-    """
-
-    def __init__(
-        self,
-        events: Sequence[AgentEvent] = (),
-        reply: Reply | None = None,
-        error: Exception | None = None,
-        during: Callable[[], object] | None = None,
-    ) -> None:
-        self.events = list(events)
-        self.reply = reply
-        self.error = error
-        self.during = during
-        self.questions: list[Question] = []
-
-    def __call__(self, question: Question, on_event: OnEvent) -> Reply:
-        self.questions.append(question)
-        for event in self.events:
-            on_event(event)
-        if self.during is not None:
-            self.during()
-        if self.error is not None:
-            raise self.error
-        assert self.reply is not None, "a FakeCoach needs a reply or an error"
-        return self.reply
 
 
 ANSWER = "No - only once per battlefield per turn (rule 472)."

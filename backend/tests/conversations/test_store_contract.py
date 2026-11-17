@@ -1,4 +1,4 @@
-"""Ownership and cap rules every ConversationStore must honour.
+"""Ownership, cap and feedback rules every ConversationStore must honour.
 
 Each test runs against the in-memory fake (always) and the Postgres store (only with
 `pytest -m integration`), which keeps the fake behind the API tests honest.
@@ -13,7 +13,11 @@ import pytest
 from sqlalchemy import Connection
 
 from backend.conversations.limits import Limits, MessageTooLongError
-from backend.conversations.store import ConversationStore, SqlConversationStore
+from backend.conversations.store import (
+    ConversationStore,
+    SqlConversationStore,
+    UnscorableMessageError,
+)
 from tests.conversations.memory_store import InMemoryConversationStore
 
 LIMITS = Limits(max_message_chars=50, max_history_messages=3)
@@ -130,6 +134,70 @@ def test_history_is_the_most_recent_turns_oldest_first_capped(harness: Harness) 
         ("user", "q4"),
     ]
     assert harness.store.history(bob, conversation.id) is None
+
+
+def test_feedback_is_stored_on_the_answer_and_a_change_keeps_when_it_was_first_given(
+    harness: Harness,
+) -> None:
+    alice = harness.new_user()
+    conversation = harness.store.create(alice, None)
+    answer = harness.store.add_message(alice, conversation.id, "assistant", "No.", "trace-1")
+    assert answer is not None
+
+    first = harness.store.give_feedback(alice, conversation.id, answer.id, "up")
+    changed = harness.store.give_feedback(alice, conversation.id, answer.id, "down")
+
+    assert first is not None and first.feedback is not None
+    assert changed is not None and changed.feedback is not None
+    assert changed.feedback.rating == "down"
+    assert changed.feedback.given_at == first.feedback.given_at
+    detail = harness.store.get(alice, conversation.id)
+    assert detail is not None
+    assert [m.feedback for m in detail.messages] == [changed.feedback]
+
+
+def test_feedback_only_lands_on_the_users_own_message_in_that_conversation(
+    harness: Harness,
+) -> None:
+    alice, bob = harness.new_user(), harness.new_user()
+    conversation = harness.store.create(alice, None)
+    other = harness.store.create(alice, None)
+    answer = harness.store.add_message(alice, conversation.id, "assistant", "No.", "trace-1")
+    assert answer is not None
+
+    assert harness.store.give_feedback(bob, conversation.id, answer.id, "up") is None
+    assert harness.store.give_feedback(alice, other.id, answer.id, "up") is None
+    assert harness.store.give_feedback(alice, conversation.id, uuid.uuid4(), "up") is None
+    detail = harness.store.get(alice, conversation.id)
+    assert detail is not None
+    assert [m.feedback for m in detail.messages] == [None]
+
+
+def test_only_answers_with_a_trace_can_receive_feedback(harness: Harness) -> None:
+    alice = harness.new_user()
+    conversation = harness.store.create(alice, None)
+    question = harness.store.add_message(alice, conversation.id, "user", "Can I score twice?")
+    untraced = harness.store.add_message(alice, conversation.id, "assistant", "No.")
+    assert question is not None and untraced is not None
+
+    for message in (question, untraced):
+        with pytest.raises(UnscorableMessageError):
+            harness.store.give_feedback(alice, conversation.id, message.id, "up")
+    detail = harness.store.get(alice, conversation.id)
+    assert detail is not None
+    assert [m.feedback for m in detail.messages] == [None, None]
+
+
+def test_feedback_does_not_move_its_conversation_to_the_top(harness: Harness) -> None:
+    alice = harness.new_user()
+    older = harness.store.create(alice, "older")
+    answer = harness.store.add_message(alice, older.id, "assistant", "No.", "trace-1")
+    newer = harness.store.create(alice, "newer")
+    assert answer is not None
+
+    harness.store.give_feedback(alice, older.id, answer.id, "up")
+
+    assert [c.id for c in harness.store.list_for_user(alice)] == [newer.id, older.id]
 
 
 def test_a_new_message_moves_its_conversation_to_the_top(harness: Harness) -> None:

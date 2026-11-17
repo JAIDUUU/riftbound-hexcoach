@@ -1,9 +1,11 @@
-"""The HTTP API (issues #11, #12): Supabase-authenticated conversations and chat.
+"""The HTTP API (issues #11, #12, #19): Supabase-authenticated conversations, streamed
+chat and feedback.
 
 `create_app` takes its collaborators (the token verifier, a way to open a conversation
-store for one request, and the coach that answers messages), so tests build the app with
-fake keys, an in-memory store and a scripted coach; `production_app` wires Supabase's
-JWKS, Postgres and the real agent. Serve it with `uv run backend serve`.
+store for one request, the coach that answers messages, and the Langfuse client feedback
+is scored with), so tests build the app with fake keys, an in-memory store, a scripted
+coach and a fake Langfuse; `production_app` wires Supabase's JWKS, Postgres, the real
+agent and Langfuse. Serve it with `uv run backend serve`.
 """
 
 import uuid
@@ -13,7 +15,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -21,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from backend.agent.coach import Coach, Question
 from backend.agent.graph import Role
+from backend.agent.tracing import ScoreClient, langfuse_scores, score_feedback
 from backend.api.auth import (
     AuthenticatedUser,
     AuthError,
@@ -35,7 +47,10 @@ from backend.conversations.store import (
     Conversation,
     ConversationDetail,
     ConversationStore,
+    Message,
+    Rating,
     SqlConversationStore,
+    UnscorableMessageError,
 )
 
 
@@ -44,6 +59,7 @@ class _Collaborators:
     verifier: TokenVerifier
     open_store: OpenStore
     coach: Coach
+    scores: ScoreClient | None
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -78,10 +94,15 @@ def conversation_store(request: Request) -> Generator[ConversationStore]:
         yield store
 
 
+def score_client(request: Request) -> ScoreClient | None:
+    return _collaborators(request).scores
+
+
 User = Annotated[AuthenticatedUser, Depends(current_user)]
 # scope="function": the transaction commits before the response is sent, so a failed
 # commit can never hide behind a 2xx the client already received.
 Store = Annotated[ConversationStore, Depends(conversation_store, scope="function")]
+Scores = Annotated[ScoreClient | None, Depends(score_client)]
 
 
 class ConversationIn(BaseModel):
@@ -110,6 +131,18 @@ class MessageOut(BaseModel):
     content: str
     trace_id: str | None
     created_at: datetime
+    feedback: Rating | None
+
+    @classmethod
+    def of(cls, message: Message) -> "MessageOut":
+        return cls(
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            trace_id=message.trace_id,
+            created_at=message.created_at,
+            feedback=None if message.feedback is None else message.feedback.rating,
+        )
 
 
 class ConversationDetailOut(ConversationOut):
@@ -119,17 +152,12 @@ class ConversationDetailOut(ConversationOut):
     def of_detail(cls, detail: ConversationDetail) -> "ConversationDetailOut":
         return cls(
             **ConversationOut.of(detail.conversation).model_dump(),
-            messages=[
-                MessageOut(
-                    id=message.id,
-                    role=message.role,
-                    content=message.content,
-                    trace_id=message.trace_id,
-                    created_at=message.created_at,
-                )
-                for message in detail.messages
-            ],
+            messages=[MessageOut.of(message) for message in detail.messages],
         )
+
+
+class FeedbackIn(BaseModel):
+    rating: Rating
 
 
 def _not_found() -> HTTPException:
@@ -201,15 +229,45 @@ def post_message(
     yield from stream_turn(turn, collaborators.coach, collaborators.open_store)
 
 
+@router.put("/{conversation_id}/messages/{message_id}/feedback")
+def give_feedback(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: FeedbackIn,
+    user: User,
+    store: Store,
+    scores: Scores,
+    after_response: BackgroundTasks,
+) -> MessageOut:
+    try:
+        message = store.give_feedback(user.id, conversation_id, message_id, body.rating)
+    except UnscorableMessageError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    if scores is not None and message.trace_id is not None and message.feedback is not None:
+        # Runs after the store has committed, so Langfuse never gets a vote we lost.
+        after_response.add_task(
+            score_feedback, scores, message.id, message.trace_id, message.feedback
+        )
+    return MessageOut.of(message)
+
+
 def _message_too_long(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
     )
 
 
-def create_app(verifier: TokenVerifier, open_store: OpenStore, coach: Coach) -> FastAPI:
+def create_app(
+    verifier: TokenVerifier,
+    open_store: OpenStore,
+    coach: Coach,
+    scores: ScoreClient | None = None,
+) -> FastAPI:
+    """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored."""
     app = FastAPI(title="HexCoach API")
-    app.state.collaborators = _Collaborators(verifier, open_store, coach)
+    app.state.collaborators = _Collaborators(verifier, open_store, coach, scores)
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
     app.add_exception_handler(MessageTooLongError, _message_too_long)
@@ -233,4 +291,4 @@ def production_app() -> FastAPI:
             yield SqlConversationStore(connection, limits)
 
     coach = database_coach(engine, chat_chain())
-    return create_app(supabase_verifier(supabase_url()), open_store, coach)
+    return create_app(supabase_verifier(supabase_url()), open_store, coach, langfuse_scores())
