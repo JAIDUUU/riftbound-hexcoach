@@ -44,10 +44,10 @@ class MessageIn(BaseModel):
     mentions: list[MentionIn] = Field(default_factory=list[MentionIn])
 
 
-def _mentioned(
+def _check_and_resolve_mentions(
     request: Request, user_id: uuid.UUID, mentions: Sequence[MentionIn]
 ) -> tuple[Mentioned, ...]:
-    """The message's mentions, resolved; over the cap or unresolvable is a 422."""
+    """Hold the mentions to the cap, then resolve them; either failing is a 422."""
     if not mentions:
         return ()
     app = collaborators(request)
@@ -78,7 +78,7 @@ def begin_turn(
     if history is None:
         raise conversation_not_found()
     app.limits.check_message(body.content)
-    mentions = _mentioned(request, user.id, body.mentions)
+    mentions = _check_and_resolve_mentions(request, user.id, body.mentions)
     refund = _reserve_slot(request, user)
     try:
         with app.open_store() as store:
