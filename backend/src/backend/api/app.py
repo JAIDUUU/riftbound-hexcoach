@@ -193,8 +193,8 @@ def give_feedback(
     message = store.give_feedback(user.id, conversation_id, message_id, body.rating)
     if message is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
-    if scores is not None and message.trace_id is not None:
-        score_feedback(scores, message.trace_id, body.rating)
+    if scores is not None and message.trace_id is not None and message.feedback is not None:
+        score_feedback(scores, message.id, message.trace_id, message.feedback)
     return MessageOut.of(message)
 
 

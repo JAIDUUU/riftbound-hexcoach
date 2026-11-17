@@ -93,3 +93,31 @@ def test_a_thumbs_up_is_scored_on_the_answers_trace_and_shown_on_reload(
     conversation_url = url.split("/messages/")[0]
     messages = client.get(conversation_url, headers=_as(ALICE)).json()["messages"]
     assert [m["feedback"] for m in messages] == [None, "up"]
+
+
+def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    url = _answered(store)
+
+    client.put(url, json={"rating": "up"}, headers=_as(ALICE))
+    response = client.put(url, json={"rating": "down"}, headers=_as(ALICE))
+
+    assert response.json()["feedback"] == "down"
+    first, second = langfuse.scores
+    assert second["value"] == 0.0
+    # Langfuse overwrites a score only when id, name and timestamp date all match.
+    assert second["score_id"] is not None
+    assert (second["score_id"], second["name"]) == (first["score_id"], first["name"])
+    assert second["timestamp"] is not None
+    assert second["timestamp"] == first["timestamp"]
+
+
+def test_each_answer_gets_its_own_score(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    client.put(_answered(store), json={"rating": "up"}, headers=_as(ALICE))
+    client.put(_answered(store), json={"rating": "up"}, headers=_as(ALICE))
+
+    first, second = langfuse.scores
+    assert first["score_id"] != second["score_id"]

@@ -8,6 +8,7 @@ untraced run, so tests and CI never need credentials.
 """
 
 import hashlib
+import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, Protocol
@@ -17,7 +18,7 @@ from langchain_core.tools import BaseTool
 
 from backend.agent.graph import AgentState, ChatModel, Retriever, Turn, run_agent
 from backend.config import optional_env
-from backend.conversations.store import Rating
+from backend.conversations.store import Feedback
 
 
 def hash_user_id(user_id: str) -> str:
@@ -112,11 +113,20 @@ def langfuse_scores() -> ScoreClient | None:
     return get_client()
 
 
-def score_feedback(client: ScoreClient, trace_id: str, rating: Rating) -> None:
-    """Send the player's feedback on an answer as a score on that answer's trace."""
+def score_feedback(
+    client: ScoreClient, message_id: uuid.UUID, trace_id: str, feedback: Feedback
+) -> None:
+    """Send the player's feedback on an answer as a score on that answer's trace.
+
+    Langfuse overwrites a score only when its id, name and timestamp date all match, so
+    the id comes from the message and the timestamp is when feedback was first given:
+    a changed vote replaces the score rather than adding a second one.
+    """
     client.create_score(
         name="feedback",
-        value=1.0 if rating == "up" else 0.0,
+        value=1.0 if feedback.rating == "up" else 0.0,
         trace_id=trace_id,
+        score_id=f"feedback-{message_id}",
         data_type="BOOLEAN",
+        timestamp=feedback.given_at,
     )
