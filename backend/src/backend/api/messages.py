@@ -1,6 +1,7 @@
 """Sending a message (issues #12, #18, #20): every check that can refuse it runs before
 the event stream opens, then the turn streams as server-sent events (turn.py)."""
 
+import logging
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from typing import Annotated
@@ -18,6 +19,8 @@ from backend.conversations.limits import TooManyMentionsError
 from backend.mentions import UnknownMentionError, resolve_mentions
 from backend.turns import Mention, Mentioned, MentionKind
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/conversations")
 
 
@@ -28,6 +31,15 @@ def _reserve_slot(request: Request, user: AuthenticatedUser) -> Callable[[], Non
         return lambda: None
     reservation = quota.reserve(user.id)
     return lambda: quota.refund(reservation)
+
+
+def _refund_quietly(refund: Callable[[], None]) -> None:
+    """Refund on the way out of a refusal: a failing refund is logged, never raised, so
+    the player still gets the refusal's own 404 or 422 rather than a 500."""
+    try:
+        refund()
+    except Exception:
+        _log.exception("Could not refund the quota slot of a refused message")
 
 
 class MentionIn(BaseModel):
@@ -85,7 +97,7 @@ def begin_turn(
             if store.add_message(user.id, conversation_id, "user", body.content) is None:
                 raise conversation_not_found()  # deleted since its history was read
     except BaseException:
-        refund()
+        _refund_quietly(refund)
         raise
     question = Question(
         text=body.content,

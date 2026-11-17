@@ -14,9 +14,11 @@ from backend.agent.graph import AgentEvent, Outcome, Started, Step, Token
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
+from backend.conversations.store import Message
 from backend.decks.access import DeckAccess, OpenDecks
 from backend.llm.providers import AllProvidersFailedError
 from backend.quota.admission import MessageQuota, QuotaSettings
+from backend.quota.store import UsageStore
 from backend.retrieval.repository import SearchHit
 from backend.turns import MentionedCard, MentionedDeck, Turn
 from tests.api.app_factory import make_app
@@ -26,7 +28,7 @@ from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import InMemoryDeckStore, no_decks
 from tests.quota.fake_clock import FakeClock
-from tests.quota.memory_usage import memory_quota
+from tests.quota.memory_usage import InMemoryUsageStore, memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -691,3 +693,31 @@ def test_a_failure_while_building_final_ends_in_error_stores_nothing_and_refunds
     assert detail is not None and [m.role for m in detail.messages] == ["user"]
     again = store.create(ALICE, None)
     assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
+
+
+class _UnrefundableUsage(InMemoryUsageStore):
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        raise ConnectionError("usage table unreachable")
+
+
+class _DeletedBeforeInsert(InMemoryConversationStore):
+    """The conversation is deleted between reading its history and storing the message."""
+
+    def add_message(self, *args: Any, **kwargs: Any) -> Message | None:
+        return None
+
+
+def test_a_failing_refund_never_replaces_the_original_refusal() -> None:
+    store = _DeletedBeforeInsert(Limits())
+    conversation = store.create(ALICE, None)
+    usage = _UnrefundableUsage()
+
+    @contextmanager
+    def open_usage() -> Generator[UsageStore]:
+        yield usage
+
+    quota = MessageQuota(QuotaSettings(), open_usage, FakeClock(EVENING))
+
+    response = _send(store, FakeCoach([Started(None)], ANSWERED), quota, conversation.id)
+
+    assert response.status_code == 404
