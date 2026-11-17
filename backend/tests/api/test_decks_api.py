@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from backend.api.app import DeckAccess, create_app
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
+from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier, mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
@@ -42,7 +43,13 @@ def client(decks: InMemoryDeckStore, cards_by_name: dict[str, Card]) -> TestClie
         yield DeckAccess(decks, cards)
 
     return TestClient(
-        create_app(fake_verifier(), open_store, open_decks=open_decks, coach=unused_coach)
+        create_app(
+            fake_verifier(),
+            open_store,
+            open_decks=open_decks,
+            coach=unused_coach,
+            delete_account=unused_account_deletion,
+        )
     )
 
 
@@ -167,7 +174,13 @@ def test_reading_a_deck_validates_it_against_the_current_cards(
         yield InMemoryConversationStore(Limits())
 
     client = TestClient(
-        create_app(fake_verifier(), no_conversations, open_decks=open_decks, coach=unused_coach)
+        create_app(
+            fake_verifier(),
+            no_conversations,
+            open_decks=open_decks,
+            coach=unused_coach,
+            delete_account=unused_account_deletion,
+        )
     )
     saved = client.post(
         "/decks",
