@@ -262,18 +262,27 @@ checked:
 | `MESSAGES_PER_DAY`     | 50      | messages per UTC calendar day, across all processes       |
 | `MAX_MESSAGE_CHARS`    | 4000    | characters per message (422)                              |
 | `MAX_HISTORY_MESSAGES` | 20      | earlier messages sent to the LLM (older ones are dropped) |
+| `MAX_MENTIONS`         | 10      | @ mentions per message (422)                              |
 | `MAX_DECKLIST_CHARS`   | 4000    | characters per decklist (422)                             |
 
 The per-minute throttle is in memory, so it is per process and starts afresh on a restart.
 The daily count is in Postgres (`daily_usage`, migration 0011), one row per player per UTC
-day, so every quota resets at 00:00 UTC. It is counted and checked in one statement, so two
-messages sent at once can't both take the last slot.
+day, so every quota resets at 00:00 UTC. Each limit is checked and taken in one step (under a
+lock for the throttle, in one SQL statement for the day), so two messages sent at once can't
+both take the last slot.
 
-What counts: the checks run first on `POST /conversations/{id}/messages`, right after the
-token. A message the throttle lets through counts toward the minute, and one the daily quota
-then lets through counts toward the day, even if it is then refused as a 404 or 422 or its
-run fails (a failed run has usually already spent provider calls). A message refused with a
-429 counts toward neither, and so does a request without a valid token.
+What counts: only a message whose turn ends in `final`. On
+`POST /conversations/{id}/messages` the limits are checked last, after the token (401), the
+conversation (404), the length cap and the mentions (422), so a refused message never takes a
+slot. The slot it takes is refunded, in both limits, if the turn ends in an `error` event
+(`providers_unavailable`, `internal`, `conversation_deleted`) or the message can't be stored.
+A refund goes back to the UTC day the message was counted on. A player who disconnects
+mid-answer still uses their slot: the run carries on and stores the answer, which they find
+on their next visit. A 429 takes no slot in either limit. If the API process dies mid-run, the
+day's slot stays taken (and the minute's goes with the process).
+
+Each of these steps is its own short transaction, run one after another, so a message never
+holds two pooled connections at once.
 
 Over a limit, the response is a 429 with a `Retry-After` header (whole seconds) and a body
 the frontend can branch on:
