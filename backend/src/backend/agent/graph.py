@@ -97,6 +97,26 @@ AgentEvent = Started | Step | Token
 OnEvent = Callable[[AgentEvent], None]
 
 
+@dataclass(frozen=True, slots=True)
+class MentionedCard:
+    """A Card the player @-mentioned, with its full text."""
+
+    name: str
+    text: str  # name, type line and cleaned text, as lookup_card returns them
+
+
+@dataclass(frozen=True, slots=True)
+class MentionedDeck:
+    """A Deck the player @-mentioned, as card names only: no counts and no card text."""
+
+    name: str
+    sections: tuple[tuple[str, tuple[str, ...]], ...]  # (section, oracle names), in order
+
+
+Mentioned = MentionedCard | MentionedDeck
+"""What one @ mention puts into the turn's context (resolved by backend.mentions)."""
+
+
 class AgentState(TypedDict):
     """The full state. Keys are filled in graph order; LangGraph merges partial updates,
     so nodes return plain dicts and the graph's structure guarantees every read below
