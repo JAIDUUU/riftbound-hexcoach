@@ -1,4 +1,4 @@
-"""SQLAlchemy Core definition of `decks` (mirrored by migration 0009).
+"""SQLAlchemy Core definition of `decks` (mirrored by migration 0010).
 
 The `user_id -> auth.users` foreign key lives only in the migration: auth.users belongs
 to Supabase and is not part of our metadata.

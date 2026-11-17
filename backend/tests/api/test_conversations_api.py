@@ -7,14 +7,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.api.app import DeckAccess, Store, User, create_app
+from backend.api.app import Store, User, create_app
 from backend.api.auth import TokenVerifier
 from backend.conversations.limits import MAX_TITLE_CHARS, Limits
 from backend.conversations.store import ConversationStore
 from tests.api.tokens import ISSUER, fake_verifier, mint
-from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import InMemoryDeckStore
+from tests.decks.memory_store import no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -30,11 +29,7 @@ def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    @contextmanager
-    def open_decks() -> Generator[DeckAccess]:
-        yield DeckAccess(InMemoryDeckStore(), InMemoryCardCatalog([]))
-
-    return create_app(verifier, open_store, open_decks)
+    return create_app(verifier, open_store, no_decks)
 
 
 def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:

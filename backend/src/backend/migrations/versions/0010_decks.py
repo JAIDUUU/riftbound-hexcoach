@@ -10,8 +10,8 @@ tables closed; the explicit REVOKE holds even if this runs as a different role.
 
 Timestamps default to clock_timestamp(), not now(), matching 0006.
 
-Revision ID: 0009
-Revises: 0008
+Revision ID: 0010
+Revises: 0009
 Create Date: 2026-11-17
 """
 
@@ -20,8 +20,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0009"
-down_revision: str | None = "0008"
+revision: str = "0010"
+down_revision: str | None = "0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

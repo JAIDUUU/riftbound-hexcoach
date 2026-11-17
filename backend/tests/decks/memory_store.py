@@ -5,10 +5,14 @@ SqlDeckStore, so API tests built on this fake can't drift from production.
 """
 
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from backend.api.app import DeckAccess
 from backend.decks.store import Deck
+from tests.cards.memory_catalog import InMemoryCardCatalog
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -60,3 +64,9 @@ class InMemoryDeckStore:
             return False
         del self.rows[deck_id]
         return True
+
+
+@contextmanager
+def no_decks() -> Generator[DeckAccess]:
+    """Deck access for API tests that never touch decks."""
+    yield DeckAccess(InMemoryDeckStore(), InMemoryCardCatalog([]))

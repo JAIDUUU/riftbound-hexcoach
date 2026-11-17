@@ -1,4 +1,4 @@
-"""Migration 0009 against Postgres: the account cascade and decks/schema.py's mirror."""
+"""Migration 0010 against Postgres: the account cascade and decks/schema.py's mirror."""
 
 import uuid
 from collections.abc import Callable

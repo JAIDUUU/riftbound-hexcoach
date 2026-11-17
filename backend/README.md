@@ -141,6 +141,14 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   conversation store, the boundary every message write and every LLM-bound history read
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
+- `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
+  records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
+  The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
+  shows it after a reload, and is sent to Langfuse as a `feedback` BOOLEAN score on the
+  answer's trace once the vote has committed. Langfuse replaces a score only when its id,
+  name and timestamp date all match, so each message has one score id and the backend
+  resends the time feedback was first given: changing the vote replaces the score.
+  Without Langfuse keys the vote is only stored.
 
 Decks are per account, with the same ownership rules (someone else's deck is a 404):
 
@@ -184,9 +192,10 @@ a migration:
 `pytest -m integration` before merging a migration.
 
 Tests never call Supabase: tokens are signed with locally generated keys, and the API
-runs against in-memory stores that contract suites (`tests/conversations/test_store_contract.py`,
-`tests/decks/test_deck_store_contract.py`, `tests/cards/test_catalog_contract.py`) hold to
-the same rules as their Postgres counterparts.
+runs against in-memory stores and a fake Langfuse client. Contract suites hold each fake
+to the same rules as its Postgres counterpart: `tests/conversations/test_store_contract.py`
+(ownership and feedback), `tests/decks/test_deck_store_contract.py` (ownership) and
+`tests/cards/test_catalog_contract.py` (card-name matching).
 
 ### Tracing
 
