@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -16,6 +17,7 @@ from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
+BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
 
 
 class FakeLangfuse:
@@ -69,39 +71,60 @@ def _as(user: uuid.UUID) -> dict[str, str]:
     return {"Authorization": f"Bearer {mint(user)}"}
 
 
-def _answered(store: InMemoryConversationStore, trace_id: str | None = "trace-1") -> str:
-    """Alice's conversation with one traced answer; returns that answer's feedback URL."""
+@dataclass(frozen=True)
+class Answer:
+    conversation_id: uuid.UUID
+    message_id: uuid.UUID
+
+
+def _answered(store: InMemoryConversationStore, trace_id: str | None = "trace-1") -> Answer:
+    """A new conversation of Alice's holding a question and its answer."""
     conversation = store.create(ALICE, None)
     store.add_message(ALICE, conversation.id, "user", "Can I score twice?")
     answer = store.add_message(ALICE, conversation.id, "assistant", "No (rule 472).", trace_id)
     assert answer is not None
-    return f"/conversations/{conversation.id}/messages/{answer.id}/feedback"
+    return Answer(conversation.id, answer.id)
+
+
+def _vote(
+    client: TestClient,
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    rating: str,
+    user: uuid.UUID = ALICE,
+):  # starlette's TestClient response type (httpx2) isn't a dependency of ours
+    url = f"/conversations/{conversation_id}/messages/{message_id}/feedback"
+    return client.put(url, json={"rating": rating}, headers=_as(user))
+
+
+def _feedback_shown(client: TestClient, conversation_id: uuid.UUID) -> list[str | None]:
+    """The feedback each message carries when Alice reloads the conversation."""
+    detail = client.get(f"/conversations/{conversation_id}", headers=_as(ALICE)).json()
+    return [message["feedback"] for message in detail["messages"]]
 
 
 def test_a_thumbs_up_is_scored_on_the_answers_trace_and_shown_on_reload(
     client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
 ) -> None:
-    url = _answered(store)
+    answer = _answered(store)
 
-    response = client.put(url, json={"rating": "up"}, headers=_as(ALICE))
+    response = _vote(client, answer.conversation_id, answer.message_id, "up")
 
     assert response.status_code == 200
     assert response.json()["feedback"] == "up"
     [score] = langfuse.scores
     assert score["trace_id"] == "trace-1"
     assert (score["name"], score["value"], score["data_type"]) == ("feedback", 1.0, "BOOLEAN")
-    conversation_url = url.split("/messages/")[0]
-    messages = client.get(conversation_url, headers=_as(ALICE)).json()["messages"]
-    assert [m["feedback"] for m in messages] == [None, "up"]
+    assert _feedback_shown(client, answer.conversation_id) == [None, "up"]
 
 
 def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
     client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
 ) -> None:
-    url = _answered(store)
+    answer = _answered(store)
 
-    client.put(url, json={"rating": "up"}, headers=_as(ALICE))
-    response = client.put(url, json={"rating": "down"}, headers=_as(ALICE))
+    _vote(client, answer.conversation_id, answer.message_id, "up")
+    response = _vote(client, answer.conversation_id, answer.message_id, "down")
 
     assert response.json()["feedback"] == "down"
     first, second = langfuse.scores
@@ -116,8 +139,31 @@ def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
 def test_each_answer_gets_its_own_score(
     client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
 ) -> None:
-    client.put(_answered(store), json={"rating": "up"}, headers=_as(ALICE))
-    client.put(_answered(store), json={"rating": "up"}, headers=_as(ALICE))
+    for answer in (_answered(store), _answered(store)):
+        _vote(client, answer.conversation_id, answer.message_id, "up")
 
     first, second = langfuse.scores
     assert first["score_id"] != second["score_id"]
+
+
+def test_only_the_owner_can_give_feedback_and_others_get_a_plain_404(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    answer = _answered(store)
+
+    response = _vote(client, answer.conversation_id, answer.message_id, "down", user=BOB)
+
+    assert response.status_code == 404
+    assert langfuse.scores == []
+    assert _feedback_shown(client, answer.conversation_id) == [None, None]
+
+
+def test_a_message_from_another_conversation_or_a_made_up_one_is_not_found(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    answer = _answered(store)
+    other_conversation = store.create(ALICE, None).id
+
+    assert _vote(client, other_conversation, answer.message_id, "up").status_code == 404
+    assert _vote(client, other_conversation, uuid.uuid4(), "up").status_code == 404
+    assert langfuse.scores == []
