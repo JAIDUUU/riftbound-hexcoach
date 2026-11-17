@@ -10,15 +10,11 @@ from typing import Literal
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import create_app
-from backend.api.turn import OpenStore
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
-from tests.api.tokens import fake_verifier, mint
+from tests.api.app_factory import make_app
+from tests.api.tokens import mint
 from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -62,26 +58,9 @@ def langfuse() -> FakeLangfuse:
     return FakeLangfuse()
 
 
-def _opener(store: InMemoryConversationStore) -> OpenStore:
-    @contextmanager
-    def open_store() -> Generator[ConversationStore]:
-        yield store
-
-    return open_store
-
-
 @pytest.fixture
 def client(store: InMemoryConversationStore, langfuse: FakeLangfuse) -> TestClient:
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            _opener(store),
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            scores=langfuse,
-        )
-    )
+    return TestClient(make_app(store=store, scores=langfuse))
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -154,16 +133,7 @@ def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
 
 
 def test_without_langfuse_the_vote_is_still_stored(store: InMemoryConversationStore) -> None:
-    client = TestClient(
-        create_app(
-            fake_verifier(),
-            _opener(store),
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            scores=None,
-        )
-    )
+    client = TestClient(make_app(store=store, scores=None))
     answer = _answered(store)
 
     response = _vote(client, answer.conversation_id, answer.message_id, "down")
@@ -181,15 +151,7 @@ def test_a_vote_that_fails_to_commit_is_never_scored(
         raise RuntimeError("commit failed")
 
     client = TestClient(
-        create_app(
-            fake_verifier(),
-            failing_commit,
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            scores=langfuse,
-        ),
-        raise_server_exceptions=False,
+        make_app(open_store=failing_commit, scores=langfuse), raise_server_exceptions=False
     )
     answer = _answered(store)
 

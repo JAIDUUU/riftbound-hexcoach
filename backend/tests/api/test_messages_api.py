@@ -11,19 +11,17 @@ from fastapi.testclient import TestClient
 
 from backend.agent.coach import Reply
 from backend.agent.graph import AgentEvent, Started, Step, Token
-from backend.api.app import create_app
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
-from backend.conversations.store import ConversationStore
 from backend.decks.access import DeckAccess, OpenDecks
 from backend.llm.providers import AllProvidersFailedError
 from backend.quota.admission import MessageQuota, QuotaSettings
 from backend.retrieval.repository import SearchHit
 from backend.turns import MentionedCard, MentionedDeck, Turn
-from tests.api.accounts import unused_account_deletion
+from tests.api.app_factory import make_app
 from tests.api.coaches import FakeCoach
-from tests.api.tokens import fake_verifier, mint
+from tests.api.tokens import mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import InMemoryDeckStore, no_decks
@@ -89,20 +87,14 @@ def _client(
     quota: MessageQuota | None = None,
 ) -> TestClient:
     @contextmanager
-    def open_store() -> Generator[ConversationStore]:
-        yield store
-
-    @contextmanager
     def open_cards() -> Generator[CardCatalog]:
         yield cards if cards is not None else InMemoryCardCatalog([])
 
     return TestClient(
-        create_app(
-            fake_verifier(),
-            open_store,
+        make_app(
+            store=store,
             open_decks=open_decks,
             coach=coach,
-            delete_account=unused_account_deletion,
             open_cards=open_cards,
             limits=limits,
             quota=quota,

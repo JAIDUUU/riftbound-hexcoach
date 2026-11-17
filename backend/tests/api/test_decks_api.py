@@ -6,15 +6,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import create_app
 from backend.cards.collapse import Card
-from backend.conversations.limits import Limits
 from backend.decks.access import DeckAccess
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
-from tests.api.tokens import fake_verifier, mint
+from tests.api.app_factory import make_app
+from tests.api.tokens import mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
-from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import InMemoryDeckStore
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
@@ -32,26 +28,13 @@ def decks() -> InMemoryDeckStore:
 
 @pytest.fixture
 def client(decks: InMemoryDeckStore, cards_by_name: dict[str, Card]) -> TestClient:
-    conversations = InMemoryConversationStore(Limits())
     cards = InMemoryCardCatalog(cards_by_name.values())
-
-    @contextmanager
-    def open_store() -> Generator[InMemoryConversationStore]:
-        yield conversations
 
     @contextmanager
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, cards)
 
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            open_store,
-            open_decks=open_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-        )
-    )
+    return TestClient(make_app(open_decks=open_decks))
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -170,19 +153,7 @@ def test_reading_a_deck_validates_it_against_the_current_cards(
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, cards)
 
-    @contextmanager
-    def no_conversations() -> Generator[InMemoryConversationStore]:
-        yield InMemoryConversationStore(Limits())
-
-    client = TestClient(
-        create_app(
-            fake_verifier(),
-            no_conversations,
-            open_decks=open_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-        )
-    )
+    client = TestClient(make_app(open_decks=open_decks))
     saved = client.post(
         "/decks",
         json={"name": "Early", "decklist": "Legend:\n1 Annie, Dark Child"},
@@ -208,19 +179,7 @@ def _capped_client(decks: InMemoryDeckStore, max_chars: int) -> TestClient:
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, InMemoryCardCatalog([]), max_decklist_chars=max_chars)
 
-    @contextmanager
-    def no_conversations() -> Generator[InMemoryConversationStore]:
-        yield InMemoryConversationStore(Limits())
-
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            no_conversations,
-            open_decks=open_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-        )
-    )
+    return TestClient(make_app(open_decks=open_decks))
 
 
 def test_a_decklist_over_the_size_cap_is_a_plain_422_and_nothing_is_saved(

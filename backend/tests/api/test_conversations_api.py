@@ -1,22 +1,16 @@
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
 
 import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.api.app import create_app
 from backend.api.auth import TokenVerifier
 from backend.api.dependencies import Store, User
 from backend.conversations.limits import MAX_TITLE_CHARS, Limits
-from backend.conversations.store import ConversationStore
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
+from tests.api.app_factory import make_app
 from tests.api.tokens import ISSUER, fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -28,17 +22,7 @@ def store() -> InMemoryConversationStore:
 
 
 def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
-    @contextmanager
-    def open_store() -> Generator[ConversationStore]:
-        yield store
-
-    return create_app(
-        verifier,
-        open_store,
-        open_decks=no_decks,
-        coach=unused_coach,
-        delete_account=unused_account_deletion,
-    )
+    return make_app(store=store, verifier=verifier)
 
 
 def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:
