@@ -43,6 +43,17 @@ def supabase_url() -> str:
     return url
 
 
+def cors_allowed_origins() -> tuple[str, ...]:
+    """Browser origins allowed to call the API (`CORS_ALLOWED_ORIGINS`, comma-separated).
+
+    None by default, so a deploy only answers the frontends it was configured for. A
+    trailing slash is dropped because browsers send the origin without one.
+    """
+    raw = optional_env("CORS_ALLOWED_ORIGINS") or ""
+    origins = (origin.strip().rstrip("/") for origin in raw.split(","))
+    return tuple(origin for origin in origins if origin)
+
+
 def database_url() -> str:
     url = optional_env("DATABASE_URL")
     if url is None:

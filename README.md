@@ -34,6 +34,7 @@ Fill in `.env`:
 | `GOOGLE_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | `ask` and the agent evals. At least one is required. They form a fallback chain (Gemini, then Groq, then OpenRouter), and providers without a key are skipped. |
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` | Optional for `ask` (runs are traced when set). Required for the evals. |
 | `SUPABASE_URL` | Only for `serve`, the HTTP API. |
+| `CORS_ALLOWED_ORIGINS` | Only when a browser frontend calls the API: its origins, comma-separated (e.g. `http://localhost:5173`). Empty allows none. |
 
 ### 2. Build the knowledge base (once)
 
@@ -79,9 +80,14 @@ in [`backend/README.md`](backend/README.md).
 ## The HTTP API
 
 `uv run backend serve` starts the API on `http://127.0.0.1:8000`, with interactive docs at
-`/docs`. Every endpoint requires the signed-in user's Supabase access token as
-`Authorization: Bearer <jwt>`. Users only ever see their own data: someone else's
+`/docs`. Every endpoint except `GET /health` requires the signed-in user's Supabase access
+token as `Authorization: Bearer <jwt>`. Users only ever see their own data: someone else's
 conversation returns 404, exactly like a conversation that doesn't exist.
+
+`GET /health` is public. It returns `{"status": "ok"}` after a cheap database read, or 503
+when the database doesn't answer. A scheduled GitHub Actions workflow pings it so the free
+Supabase project doesn't pause. To run the API as a container and see the hosting options,
+read [`docs/deployment.md`](docs/deployment.md).
 
 ### Conversations
 
@@ -107,8 +113,6 @@ These endpoints are still being built, so their exact shapes may change:
   ([#16](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/16)).
 - Account deletion, which removes your conversations, messages and decks
   ([#21](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/21)).
-- A health check for deploys and the database keep-alive ping
-  ([#22](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/22)).
 
 ## Privacy
 

@@ -1,0 +1,10 @@
+# Secrets come from the host's environment, never the image.
+.env
+.venv
+tests
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.pyright
+Dockerfile
+.dockerignore

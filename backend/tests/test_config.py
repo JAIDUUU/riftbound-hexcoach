@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 import backend.config
-from backend.config import MissingConfigError, database_url, to_sqlalchemy_url
+from backend.config import (
+    MissingConfigError,
+    cors_allowed_origins,
+    database_url,
+    to_sqlalchemy_url,
+)
 
 
 @pytest.fixture
@@ -40,3 +45,21 @@ def test_a_missing_database_url_is_a_clear_error(
 
     with pytest.raises(MissingConfigError, match="DATABASE_URL"):
         database_url()
+
+
+def test_no_cors_origins_are_allowed_unless_configured(
+    monkeypatch: pytest.MonkeyPatch, no_dotenv: None
+) -> None:
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+
+    assert cors_allowed_origins() == ()
+
+
+def test_cors_origins_are_a_comma_separated_list(
+    monkeypatch: pytest.MonkeyPatch, no_dotenv: None
+) -> None:
+    monkeypatch.setenv(
+        "CORS_ALLOWED_ORIGINS", " https://hexcoach.example/ , http://localhost:5173,,"
+    )
+
+    assert cors_allowed_origins() == ("https://hexcoach.example", "http://localhost:5173")
