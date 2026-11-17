@@ -17,7 +17,7 @@ Supabase project sees a query and doesn't pause. It says only "ok" or 503.
 import logging
 import uuid
 from collections.abc import Callable, Generator, Iterator, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal, cast
@@ -66,15 +66,14 @@ from backend.conversations.store import (
     SqlConversationStore,
     UnscorableMessageError,
 )
+from backend.decks.access import DeckAccess, OpenDecks
 from backend.decks.importing import (
-    DEFAULT_MAX_DECKLIST_CHARS,
     DeckImport,
     DecklistTooLongError,
-    import_decklist,
     max_decklist_chars_from_env,
 )
 from backend.decks.parse import SECTIONS, Section
-from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckStore
+from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, SqlDeckStore
 from backend.decks.warnings import WarningKind
 from backend.mentions import UnknownMentionError, resolve_mentions
 from backend.quota.admission import MessageQuota, QuotaExceededError, quota_settings_from_env
@@ -89,27 +88,6 @@ PingDatabase = Callable[[], None]
 DeleteAccount = Callable[[uuid.UUID], None]
 """Deletes the user's Supabase Auth account, committed before it returns. Everything the
 user owns cascades from it; a user who is already gone is not an error."""
-
-
-@dataclass(frozen=True, slots=True)
-class DeckAccess:
-    """One request's decks: the user's saved decks and the cards to validate them against."""
-
-    decks: DeckStore
-    cards: CardCatalog
-    max_decklist_chars: int = DEFAULT_MAX_DECKLIST_CHARS
-
-    def import_new(self, decklist: str) -> DeckImport:
-        """A decklist the player is sending now, held to the size cap."""
-        return import_decklist(decklist, self.cards, max_chars=self.max_decklist_chars)
-
-    def import_saved(self, deck: Deck) -> DeckImport:
-        """A deck already saved under the cap of its day, which may have been higher."""
-        return import_decklist(deck.decklist, self.cards, max_chars=None)
-
-
-OpenDecks = Callable[[], AbstractContextManager[DeckAccess]]
-"""Opens deck access for one request; leaving the context commits (or rolls back on error)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,9 +269,7 @@ def _mentioned(
     try:
         collaborators.limits.check_mentions(len(mentions))
         with collaborators.open_decks() as access:
-            return resolve_mentions(
-                [Mention(m.kind, m.id) for m in mentions], user_id, access.decks, access.cards
-            )
+            return resolve_mentions([Mention(m.kind, m.id) for m in mentions], user_id, access)
     except (TooManyMentionsError, UnknownMentionError) as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
 

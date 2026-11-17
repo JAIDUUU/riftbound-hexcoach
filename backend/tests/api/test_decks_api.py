@@ -6,9 +6,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import DeckAccess, create_app
+from backend.api.app import create_app
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
+from backend.decks.access import DeckAccess
 from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier, mint

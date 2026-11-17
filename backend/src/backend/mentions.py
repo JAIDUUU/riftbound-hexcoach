@@ -17,8 +17,7 @@ from collections.abc import Sequence
 
 from backend.cards.catalog import CardCatalog
 from backend.cards.chunk_text import card_text_chunk
-from backend.decks.importing import import_decklist
-from backend.decks.store import DeckStore
+from backend.decks.access import DeckAccess
 from backend.turns import Mention, Mentioned, MentionedCard, MentionedDeck
 
 
@@ -37,14 +36,12 @@ def _card(mention: Mention, cards: CardCatalog) -> MentionedCard:
     return MentionedCard(name=card.oracle_name, text=card_text_chunk(card))
 
 
-def _deck(
-    mention: Mention, user_id: uuid.UUID, decks: DeckStore, cards: CardCatalog
-) -> MentionedDeck:
-    deck = decks.get(user_id, mention.id)
+def _deck(mention: Mention, user_id: uuid.UUID, access: DeckAccess) -> MentionedDeck:
+    deck = access.decks.get(user_id, mention.id)
     if deck is None:
         raise UnknownMentionError(mention)
     names: dict[str, dict[str, None]] = {}  # section -> oracle names, both in first-seen order
-    for resolved in import_decklist(deck.decklist, cards, max_chars=None).lines:
+    for resolved in access.import_saved(deck).lines:
         if resolved.card is not None:
             names.setdefault(resolved.line.section, {})[resolved.card.oracle_name] = None
     return MentionedDeck(
@@ -54,10 +51,10 @@ def _deck(
 
 
 def resolve_mentions(
-    mentions: Sequence[Mention], user_id: uuid.UUID, decks: DeckStore, cards: CardCatalog
+    mentions: Sequence[Mention], user_id: uuid.UUID, access: DeckAccess
 ) -> tuple[Mentioned, ...]:
     """The mentions in request order, a repeated one once; raises UnknownMentionError."""
     return tuple(
-        _card(mention, cards) if mention.kind == "card" else _deck(mention, user_id, decks, cards)
+        _card(mention, access.cards) if mention.kind == "card" else _deck(mention, user_id, access)
         for mention in dict.fromkeys(mentions)
     )

@@ -11,11 +11,12 @@ from fastapi.testclient import TestClient
 
 from backend.agent.coach import Reply
 from backend.agent.graph import AgentEvent, Started, Step, Token
-from backend.api.app import DeckAccess, OpenDecks, create_app
+from backend.api.app import create_app
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
+from backend.decks.access import DeckAccess, OpenDecks
 from backend.llm.providers import AllProvidersFailedError
 from backend.quota.admission import MessageQuota, QuotaSettings
 from backend.retrieval.repository import SearchHit
