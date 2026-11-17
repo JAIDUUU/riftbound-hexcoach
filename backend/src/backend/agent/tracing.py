@@ -10,6 +10,7 @@ and CI never need credentials.
 import hashlib
 from collections.abc import Sequence
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
 from backend.agent.graph import AgentState, ChatModel, Retriever, Turn, run_agent
@@ -28,6 +29,13 @@ def tracing_enabled() -> bool:
     )
 
 
+def _langfuse_callbacks() -> RunnableConfig:
+    """Config that records graph steps, LLM calls and tool calls into the current trace."""
+    from langfuse.langchain import CallbackHandler
+
+    return {"callbacks": [CallbackHandler()]}
+
+
 def run_in_open_trace(
     llm: ChatModel,
     retrieve: Retriever,
@@ -37,11 +45,7 @@ def run_in_open_trace(
     """Run the agent under a trace someone else already opened (e.g. a Langfuse
     experiment item), recording steps and LLM calls without traced_run's own ask span.
     Requires Langfuse keys; keyless callers want run_agent or traced_run instead."""
-    from langfuse.langchain import CallbackHandler
-
-    return run_agent(
-        llm, retrieve, question, config={"callbacks": [CallbackHandler()]}, tools=tools
-    )
+    return run_agent(llm, retrieve, question, config=_langfuse_callbacks(), tools=tools)
 
 
 def traced_run(
@@ -58,7 +62,6 @@ def traced_run(
         return run_agent(llm, retrieve, question, history, tools=tools), None
 
     from langfuse import get_client, propagate_attributes
-    from langfuse.langchain import CallbackHandler
 
     langfuse = get_client()
     with (
@@ -74,7 +77,7 @@ def traced_run(
     ):
         trace_id = langfuse.get_current_trace_id()
         state = run_agent(
-            llm, retrieve, question, history, config={"callbacks": [CallbackHandler()]}, tools=tools
+            llm, retrieve, question, history, config=_langfuse_callbacks(), tools=tools
         )
         span.update(output={"outcome": state["outcome"], "answer": state["answer"]})
     langfuse.flush()

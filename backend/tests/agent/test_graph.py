@@ -5,8 +5,11 @@ from typing import Any
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolCall
 from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.tools import BaseTool
+from langchain_core.tools.base import ArgsSchema
+from pydantic import BaseModel, Field
 
 from backend.agent.graph import Turn, format_evidence, run_agent
 from backend.agent.tools import make_lookup_card
@@ -313,8 +316,9 @@ class _RecordingCallbacks(BaseCallbackHandler):
 
 
 def test_tool_calls_reach_the_callbacks_passed_to_run_agent() -> None:
-    # "Each lookup_card call is traced" is a documented guarantee: the config must be
-    # threaded to tool.invoke explicitly, not left to implicit contextvar propagation.
+    # End to end: the handler given to run_agent (Langfuse, in production) sees the
+    # tool run. This alone can't tell explicit config passing from langchain-core's
+    # contextvar fallback; the next test pins the explicit hand-off.
     retriever = RecordingRetriever(
         {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
     )
@@ -327,6 +331,50 @@ def test_tool_calls_reach_the_callbacks_passed_to_run_agent() -> None:
     run_agent(llm, retriever, "Can I?", config={"callbacks": [callbacks]}, tools=[tool])
 
     assert callbacks.tool_starts == ["lookup_card"]
+
+
+class _LookupArgs(BaseModel):
+    name: str
+
+
+class _ConfigRecordingTool(BaseTool):
+    """A lookup_card that records the config argument it is handed, as given."""
+
+    name: str = "lookup_card"
+    description: str = "Look a card up by name."
+    args_schema: ArgsSchema | None = _LookupArgs
+    configs: list[RunnableConfig | None] = Field(default_factory=list[RunnableConfig | None])
+
+    def _run(self, name: str) -> str:
+        return f"{name} (Gear)\nExhaust: a unit you control gains Deflect."
+
+    def invoke(
+        self,
+        input: str | dict[str, Any] | ToolCall,
+        config: RunnableConfig | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        self.configs.append(config)
+        return super().invoke(input, config, **kwargs)
+
+
+def test_the_node_config_is_handed_to_tool_invoke_explicitly() -> None:
+    # "Each lookup_card call is traced" (CONTEXT.md) must not rest on contextvar
+    # propagation: with tool.invoke(call) and no config, this records None.
+    retriever = RecordingRetriever(
+        {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
+    )
+    tool = _ConfigRecordingTool()
+    llm = ScriptedLLM(
+        [PREPARE, STRONG, _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}), "No."]
+    )
+
+    run_agent(llm, retriever, "Can I?", config={"callbacks": [_RecordingCallbacks()]}, tools=[tool])
+
+    assert len(tool.configs) == 1
+    handed = tool.configs[0]
+    assert handed is not None
+    assert handed.get("callbacks") is not None
 
 
 def test_with_tools_the_grader_is_told_card_text_is_fixable() -> None:

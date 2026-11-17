@@ -1,9 +1,10 @@
-from collections.abc import Iterator
+import uuid
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Connection
+from sqlalchemy import Connection, text
 
 from backend.cards.collapse import Card, collapse_printings
 from backend.cards.rifthunt import RifthuntSnapshot
@@ -57,3 +58,15 @@ def db_connection(migrated_database: None) -> Iterator[Connection]:
         finally:
             transaction.rollback()
     engine.dispose()
+
+
+@pytest.fixture
+def new_auth_user(db_connection: Connection) -> Callable[[], uuid.UUID]:
+    """Creates Supabase Auth users (auth.users rows), rolled back with the test."""
+
+    def create() -> uuid.UUID:
+        user_id = uuid.uuid4()
+        db_connection.execute(text("INSERT INTO auth.users (id) VALUES (:id)"), {"id": user_id})
+        return user_id
+
+    return create

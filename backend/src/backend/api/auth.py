@@ -34,10 +34,10 @@ class AuthUnavailableError(Exception):
     """The signing keys could not be fetched, so no token can be judged right now."""
 
 
+@dataclass(frozen=True, slots=True)
 class TokenVerifier:
-    def __init__(self, signing_key_for: SigningKeyFor, issuer: str) -> None:
-        self.signing_key_for = signing_key_for
-        self.issuer = issuer
+    signing_key_for: SigningKeyFor
+    issuer: str
 
     def verify(self, token: str) -> AuthenticatedUser:
         try:
@@ -53,6 +53,10 @@ class TokenVerifier:
             raise AuthUnavailableError("Could not fetch the Supabase signing keys.") from error
         except jwt.PyJWTError as error:
             raise AuthError(f"Invalid token: {error}") from error
+        # Anonymous sessions also carry aud=authenticated; Grill Decisions requires real
+        # (OAuth) accounts, so they are refused even if the project ever enables them.
+        if claims.get("is_anonymous") is True:
+            raise AuthError("Anonymous sessions cannot use the API; sign in with OAuth.")
         try:
             return AuthenticatedUser(id=uuid.UUID(str(claims["sub"])))
         except ValueError:

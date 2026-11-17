@@ -17,6 +17,10 @@ class MissingConfigError(RuntimeError):
     """A required setting is not configured."""
 
 
+class InvalidConfigError(RuntimeError):
+    """A setting is configured but its value is unusable."""
+
+
 def to_sqlalchemy_url(url: str) -> str:
     """Make a Supabase/Postgres URL use the psycopg 3 driver."""
     for prefix in ("postgresql://", "postgres://"):

@@ -4,14 +4,15 @@ from contextlib import contextmanager
 
 import jwt
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from tests.api.tokens import ISSUER, fake_verifier, mint
-from tests.conversations.memory_store import InMemoryConversationStore
 
-from backend.api.app import create_app
+from backend.api.app import Store, User, create_app
 from backend.api.auth import TokenVerifier
 from backend.conversations.limits import MAX_TITLE_CHARS, Limits
 from backend.conversations.store import ConversationStore
+from tests.api.tokens import ISSUER, fake_verifier, mint
+from tests.conversations.memory_store import InMemoryConversationStore
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -22,12 +23,16 @@ def store() -> InMemoryConversationStore:
     return InMemoryConversationStore(Limits())
 
 
-def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:
+def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
     @contextmanager
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return TestClient(create_app(verifier, open_store))
+    return create_app(verifier, open_store)
+
+
+def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:
+    return TestClient(_app(store, verifier))
 
 
 @pytest.fixture
@@ -123,6 +128,23 @@ def test_titles_over_the_cap_are_refused(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_a_player_message_over_the_cap_is_a_422_not_a_500() -> None:
+    # No message endpoint exists until #12, so a probe route stands in for it; the
+    # handler is app-wide, which is what makes #12's endpoint inherit the mapping.
+    store = InMemoryConversationStore(Limits(max_message_chars=10))
+    app = _app(store, fake_verifier())
+
+    @app.post("/probe/{conversation_id}")
+    def probe(conversation_id: uuid.UUID, user: User, conversations: Store) -> None:
+        conversations.add_message(user.id, conversation_id, "user", "x" * 11)
+
+    conversation = store.create(ALICE, None)
+    response = TestClient(app).post(f"/probe/{conversation.id}", headers=_as(ALICE))
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Message is 11 characters; the limit is 10."}
 
 
 def test_a_malformed_conversation_id_is_a_validation_error(client: TestClient) -> None:

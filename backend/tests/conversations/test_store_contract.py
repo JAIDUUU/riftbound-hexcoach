@@ -10,20 +10,13 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
-from sqlalchemy import Connection, text
-from tests.conversations.memory_store import InMemoryConversationStore
+from sqlalchemy import Connection
 
 from backend.conversations.limits import Limits, MessageTooLongError
 from backend.conversations.store import ConversationStore, SqlConversationStore
+from tests.conversations.memory_store import InMemoryConversationStore
 
 LIMITS = Limits(max_message_chars=50, max_history_messages=3)
-
-
-def insert_auth_user(connection: Connection) -> uuid.UUID:
-    """A Supabase Auth user row (rolled back with the test transaction)."""
-    user_id = uuid.uuid4()
-    connection.execute(text("INSERT INTO auth.users (id) VALUES (:id)"), {"id": user_id})
-    return user_id
 
 
 @dataclass
@@ -37,7 +30,8 @@ def harness(request: pytest.FixtureRequest) -> Harness:
     if cast(str, request.param) == "memory":
         return Harness(InMemoryConversationStore(LIMITS), uuid.uuid4)
     connection = cast(Connection, request.getfixturevalue("db_connection"))
-    return Harness(SqlConversationStore(connection, LIMITS), lambda: insert_auth_user(connection))
+    new_user = cast(Callable[[], uuid.UUID], request.getfixturevalue("new_auth_user"))
+    return Harness(SqlConversationStore(connection, LIMITS), new_user)
 
 
 def test_a_created_conversation_is_listed_for_its_owner_only(harness: Harness) -> None:

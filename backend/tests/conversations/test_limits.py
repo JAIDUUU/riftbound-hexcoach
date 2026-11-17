@@ -1,6 +1,6 @@
 import pytest
 
-from backend.config import MissingConfigError
+from backend.config import InvalidConfigError
 from backend.conversations.limits import (
     DEFAULT_MAX_HISTORY_MESSAGES,
     DEFAULT_MAX_MESSAGE_CHARS,
@@ -36,11 +36,14 @@ def test_caps_come_from_the_environment_with_defaults(monkeypatch: pytest.Monkey
     assert DEFAULT_MAX_HISTORY_MESSAGES != 6  # the override really overrode something
 
 
-@pytest.mark.parametrize("raw", ["lots", "0", "-3"])
+@pytest.mark.parametrize(
+    ("raw", "problem"),
+    [("lots", "whole number"), ("4.5", "whole number"), ("0", "positive"), ("-3", "positive")],
+)
 def test_a_bad_cap_setting_is_a_clear_config_error(
-    monkeypatch: pytest.MonkeyPatch, raw: str
+    monkeypatch: pytest.MonkeyPatch, raw: str, problem: str
 ) -> None:
     monkeypatch.setenv("MAX_MESSAGE_CHARS", raw)
 
-    with pytest.raises(MissingConfigError, match="MAX_MESSAGE_CHARS"):
+    with pytest.raises(InvalidConfigError, match=f"MAX_MESSAGE_CHARS must be .*{problem}"):
         limits_from_env()

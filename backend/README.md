@@ -129,18 +129,34 @@ lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
 user's Supabase access token as `Authorization: Bearer <jwt>`. Tokens are verified
 against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, audience
 `authenticated`), so the backend holds no Supabase secret. Missing or bad tokens get a
-401; a JWKS outage gets a 503.
+401, and so do anonymous-session tokens (real accounts only); a JWKS outage gets a 503.
 
 - `POST /conversations` (optional `title`, at most 200 characters), `GET /conversations`
   (most recently active first), `GET /conversations/{id}` (with messages, oldest first,
   each carrying its trace id), `DELETE /conversations/{id}`.
 - Someone else's conversation is a plain 404, the same as one that doesn't exist.
 - Deleting a conversation cascades to its messages; deleting the Supabase account
-  cascades to its conversations. Both tables have row level security on with no
-  policies, so Supabase's Data API can't reach them; the backend connects as the owner.
-- Input caps (`MAX_MESSAGE_CHARS`, default 4000; `MAX_HISTORY_MESSAGES`, default 20) are
-  enforced in the conversation store, the boundary every message write and every
-  LLM-bound history read goes through.
+  cascades to its conversations.
+- Input caps (`MAX_MESSAGE_CHARS`, `MAX_HISTORY_MESSAGES`) are enforced in the
+  conversation store, the boundary every message write and every LLM-bound history read
+  goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
+  characters, 20 messages) are placeholders until the free-tier limits are verified.
+
+### Supabase's Data API is closed
+
+Supabase serves the `public` schema to anyone holding the anon key, which the frontend
+ships. None of our data goes through it, so it is locked out (migrations 0007 and 0008):
+every table has row level security on with no policies, the `anon` and `authenticated`
+roles hold no privileges on our tables or sequences, and new tables and sequences start
+that way too. The backend connects as the table owner, which bypasses RLS. When writing
+a migration:
+
+- A new table needs `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`.
+- A new function in `public` needs `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC`: Postgres
+  grants execute to everyone by default, and the Data API would expose it as an RPC.
+
+`tests/test_data_api_lockdown.py` (integration) checks the whole schema, so run
+`pytest -m integration` before merging a migration.
 
 Tests never call Supabase: tokens are signed with locally generated keys, and the API
 runs against an in-memory store that `tests/conversations/test_store_contract.py` holds to

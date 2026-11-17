@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -26,7 +27,7 @@ from backend.api.auth import (
     supabase_verifier,
 )
 from backend.config import supabase_url
-from backend.conversations.limits import MAX_TITLE_CHARS, limits_from_env
+from backend.conversations.limits import MAX_TITLE_CHARS, MessageTooLongError, limits_from_env
 from backend.conversations.store import (
     Conversation,
     ConversationDetail,
@@ -115,12 +116,8 @@ class ConversationDetailOut(ConversationOut):
 
     @classmethod
     def of_detail(cls, detail: ConversationDetail) -> "ConversationDetailOut":
-        conversation = detail.conversation
         return cls(
-            id=conversation.id,
-            title=conversation.title,
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at,
+            **ConversationOut.of(detail.conversation).model_dump(),
             messages=[
                 MessageOut(
                     id=message.id,
@@ -168,9 +165,18 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _message_too_long(request: Request, error: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
+    )
+
+
 def create_app(verifier: TokenVerifier, open_store: OpenStore) -> FastAPI:
     app = FastAPI(title="HexCoach API")
     app.state.collaborators = _Collaborators(verifier, open_store)
+    # App-wide: the cap is enforced in the store, so any endpoint that writes a player
+    # message gets a clear 422 rather than a 500.
+    app.add_exception_handler(MessageTooLongError, _message_too_long)
     app.include_router(router)
     return app
 

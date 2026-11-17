@@ -10,9 +10,18 @@ every LLM-bound history read goes through.
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
-from sqlalchemy import Connection, RowMapping, delete, func, insert, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    RowMapping,
+    delete,
+    func,
+    insert,
+    select,
+    update,
+)
 
 from backend.agent.graph import Role, Turn
 from backend.conversations.limits import Limits
@@ -103,7 +112,7 @@ def _message(row: RowMapping) -> Message:
     )
 
 
-def _owned(user_id: uuid.UUID, conversation_id: uuid.UUID) -> Any:
+def _owned(user_id: uuid.UUID, conversation_id: uuid.UUID) -> ColumnElement[bool]:
     return (conversations_table.c.id == conversation_id) & (
         conversations_table.c.user_id == user_id
     )

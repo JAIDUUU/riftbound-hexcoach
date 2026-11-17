@@ -7,15 +7,16 @@ from collections.abc import Mapping
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
-from tests.api.tokens import ISSUER, OTHER_KEY, PROJECT_KEY, fake_verifier, mint
 
 from backend.api.auth import AuthError, AuthUnavailableError, TokenVerifier
+from tests.api.tokens import ISSUER, OTHER_KEY, PROJECT_KEY, fake_verifier, mint
 
 USER = uuid.UUID("7d1f2c3a-0000-4000-8000-000000000001")
 
 
 def test_a_valid_token_yields_the_user_id_from_its_subject() -> None:
     assert fake_verifier().verify(mint(USER)).id == USER
+    assert fake_verifier().verify(mint(USER, is_anonymous=False)).id == USER  # OAuth users
 
 
 @pytest.mark.parametrize(
@@ -28,6 +29,7 @@ def test_a_valid_token_yields_the_user_id_from_its_subject() -> None:
         (mint(USER, key=OTHER_KEY), "signed by a key that isn't ours"),
         (mint(USER, exp=None), "never expires"),
         (mint("service-role"), "subject is not a user id"),
+        (mint(USER, is_anonymous=True), "anonymous session, not a real account"),
         ("not.a.jwt", "garbage"),
     ],
 )
