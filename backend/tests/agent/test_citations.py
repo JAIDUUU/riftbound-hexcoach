@@ -72,3 +72,12 @@ def test_years_dates_and_short_numbers_are_not_citations() -> None:
     answer = "As of the 2026-10-09 rules, with 4 might and 12 damage, see rule 472."
 
     assert cited_rules(answer) == {"472"}
+
+
+def test_a_title_inside_another_word_is_not_a_citation() -> None:
+    sona = hit("card_text", title="Sona")
+    shield = hit("card_text", title="Shield")
+
+    answer = "Personally I'd keep the shields for the champion fight; Sona's one ready is enough."
+
+    assert cited_evidence(answer, [sona, shield]) == [sona]
