@@ -17,11 +17,13 @@ from langchain_core.tools import BaseTool
 from langchain_core.tools.base import ArgsSchema
 from pydantic import BaseModel, Field
 
+from backend.agent.citations import cited_evidence
 from backend.agent.graph import (
     AgentEvent,
     Reset,
     Step,
     Token,
+    evidence,
     format_evidence,
     run_agent,
 )
@@ -600,3 +602,62 @@ def test_text_written_before_a_tool_call_is_reset_once_the_call_is_made(
     # The silent second round streamed nothing, so it has nothing to reset.
     assert _spans(events) == ["Let me check Zhonya's Hourglass.", state["answer"]]
     assert state["answer"] == "No, it only grants Deflect."
+
+
+def card_hit(title: str, text: str) -> SearchHit:
+    return SearchHit(
+        chunk_id=11,
+        source_type="card_text",
+        rule_id=None,
+        section=None,
+        text=text,
+        source_version="2026-11-06",
+        source_date=date(2026, 11, 6),
+        title=title,
+        source_url=None,
+    )
+
+
+def test_a_looked_up_card_is_evidence_the_answer_can_cite(zhonyas: RecordingCatalog) -> None:
+    llm = ScriptedLLM(
+        [
+            PREPARE,
+            STRONG,
+            _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}),
+            _tool_call("lookup_card", {"name": "Zhonyas Hourglas"}, "call-2"),  # not found
+            "No: [[Zhonya's Hourglass]] only grants Deflect.",
+        ]
+    )
+
+    state = run_agent(
+        llm, RecordingRetriever({}), "Does it stop it?", tools=[make_lookup_card(zhonyas)]
+    )
+
+    [cited] = cited_evidence(state["answer"], evidence(state))
+    assert (cited.source_type, cited.title) == ("card_text", "Zhonya's Hourglass")
+    assert cited.text == "Zhonya's Hourglass (Gear)\nExhaust: a unit you control gains Deflect."
+    assert cited.source_date == date(2026, 11, 6)  # the card snapshot's date
+
+
+def test_a_mentioned_card_is_evidence_the_answer_can_cite(cards_by_name: dict[str, Card]) -> None:
+    sona = MentionedCard(cards_by_name["Sona, Harmonious"])
+    llm = ScriptedLLM([PREPARE, STRONG, "Yes: [[Sona, Harmonious]] readies up to 4 runes."])
+
+    state = run_agent(llm, RecordingRetriever({}), "Does she ready runes?", mentions=[sona])
+
+    [cited] = cited_evidence(state["answer"], evidence(state))
+    assert (cited.source_type, cited.title, cited.text) == ("card_text", sona.name, sona.text)
+
+
+def test_a_card_retrieved_and_also_looked_up_is_one_piece_of_evidence(
+    zhonyas: RecordingCatalog,
+) -> None:
+    retrieved = card_hit("Zhonya's Hourglass", "Zhonya's Hourglass (Gear)\n...")
+    retriever = RecordingRetriever({"score battlefield twice per turn": [retrieved]})
+    llm = ScriptedLLM(
+        [PREPARE, STRONG, _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}), "No."]
+    )
+
+    state = run_agent(llm, retriever, "Does it stop it?", tools=[make_lookup_card(zhonyas)])
+
+    assert evidence(state) == (retrieved,)

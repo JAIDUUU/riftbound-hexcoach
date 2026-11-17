@@ -42,6 +42,8 @@ from backend.agent.prompts import (
     PREPARE_PROMPT,
     TOOLS_NOTE,
 )
+from backend.cards.chunk_text import card_text_chunk
+from backend.cards.collapse import Card
 from backend.retrieval.precedence import order_by_precedence
 from backend.retrieval.repository import SearchHit
 from backend.turns import Mentioned, MentionedCard, MentionedDeck, Turn
@@ -120,6 +122,7 @@ class AgentState(TypedDict):
     retrievals: int
     grade: Literal["strong", "weak"]
     rewritten: bool  # did the grader supply a different query for the retry?
+    looked_up: list[Card]  # the Cards lookup_card found while answering
     answer: str
     outcome: Outcome
 
@@ -156,6 +159,37 @@ def _json_call(llm: ChatModel, system: str, user: str) -> dict[str, Any]:
             ]
         )
         return _parse_json(retry)
+
+
+def _card_evidence(card: Card) -> SearchHit:
+    """A Card's text as evidence, exactly as it is indexed for retrieval (`backend
+    load-cards`); it was looked up or mentioned rather than retrieved, so has no chunk."""
+    snapshot_date = card.snapshot_fetched.date()
+    return SearchHit(
+        chunk_id=0,
+        source_type="card_text",
+        rule_id=None,
+        section=None,
+        text=card_text_chunk(card),
+        source_version=snapshot_date.isoformat(),
+        source_date=snapshot_date,
+        title=card.oracle_name,
+        source_url=None,
+    )
+
+
+def evidence(state: AgentState) -> tuple[SearchHit, ...]:
+    """Everything the reply was written from, for citations: the retrieved chunks, then
+    the Cards the player mentioned and the ones looked up, each Card once (a retrieved
+    chunk of a Card's text stands for it)."""
+    hits = list(state["hits"])
+    seen = {hit.title for hit in hits if hit.source_type == "card_text"}
+    mentioned = [m.card for m in state.get("mentions", []) if isinstance(m, MentionedCard)]
+    for card in [*mentioned, *state.get("looked_up", [])]:
+        if card.oracle_name not in seen:
+            seen.add(card.oracle_name)
+            hits.append(_card_evidence(card))
+    return tuple(hits)
 
 
 def format_evidence(hits: Sequence[SearchHit]) -> str:
@@ -270,18 +304,25 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
     def answer(state: AgentState, config: RunnableConfig) -> _Update:
         extra = f"\n\n{TOOLS_NOTE}" if tools else ""
         messages = respond_messages(state, ANSWER_PROMPT, "Evidence", extra)
+        looked_up: list[Card] = []
         for _ in range(MAX_TOOL_ROUNDS):
             reply = answer_model.invoke(messages, config)
             if not isinstance(reply, AIMessage) or not reply.tool_calls:
-                return {"answer": reply.text, "outcome": "answered"}
+                return {"answer": reply.text, "outcome": "answered", "looked_up": looked_up}
             messages.append(reply)
-            messages.extend(run_tool(call, config) for call in reply.tool_calls)
+            results = [run_tool(call, config) for call in reply.tool_calls]
+            messages.extend(results)
+            looked_up.extend(
+                result.artifact
+                for result in results
+                if isinstance(result, ToolMessage) and isinstance(result.artifact, Card)
+            )
         # Still asking for lookups at the cap: force an answer from what it has.
         final = llm.invoke(
             [*messages, HumanMessage("Answer now using only the information you already have.")],
             config,
         )
-        return {"answer": final.text, "outcome": "answered"}
+        return {"answer": final.text, "outcome": "answered", "looked_up": looked_up}
 
     def abstain(state: AgentState) -> _Update:
         messages = respond_messages(state, ABSTAIN_PROMPT, "Evidence that was found (insufficient)")

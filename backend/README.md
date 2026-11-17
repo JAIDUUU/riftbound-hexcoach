@@ -199,9 +199,11 @@ preview. On `reset` the client clears the text streamed so far and starts again 
 failed halfway through (the next provider starts over) or because the model wrote some text and
 then looked a card up instead of answering. `reset` is only sent after some text was streamed.
 `final.text` is the authoritative answer, so the client replaces the streamed text with it.
-`citations` are the retrieved chunks the
-answer actually cites (by rule number, FAQ title or card name), most authoritative source first,
-each with `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and `text`.
+`citations` are the evidence the answer actually cites (by rule number, or by FAQ title or
+card name as whole words), most authoritative source first: the retrieved chunks, plus the
+text of every Card the player @-mentioned or the agent looked up with `lookup_card` (each Card
+once). Each has `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and
+`text`.
 `cards` holds the answer's validated card tags (below). Error codes:
 `providers_unavailable` (every provider in the chain failed), `conversation_deleted` (deleted
 while the answer was being written) and `internal`. On an error the player's message stays

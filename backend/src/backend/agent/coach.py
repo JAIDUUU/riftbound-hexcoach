@@ -18,7 +18,7 @@ from typing import Protocol
 from langchain_core.tools import BaseTool
 from sqlalchemy import Connection, Engine
 
-from backend.agent.graph import AgentState, ChatModel, OnEvent, Outcome, Retriever
+from backend.agent.graph import AgentState, ChatModel, OnEvent, Outcome, Retriever, evidence
 from backend.agent.tracing import traced_run
 from backend.retrieval.repository import SearchHit
 from backend.turns import Mentioned, Turn
@@ -42,7 +42,7 @@ class Question:
 class Reply:
     answer: str
     outcome: Outcome
-    evidence: tuple[SearchHit, ...]  # the chunks the answer was written from
+    evidence: tuple[SearchHit, ...]  # what the answer was written from (graph.evidence)
 
 
 class Coach(Protocol):
@@ -111,6 +111,6 @@ def database_coach(engine: Engine, llm: ChatModel) -> Coach:
             on_event=on_event,
             mentions=question.mentions,
         )
-        return Reply(state["answer"], state["outcome"], tuple(state["hits"]))
+        return Reply(state["answer"], state["outcome"], evidence(state))
 
     return coach
