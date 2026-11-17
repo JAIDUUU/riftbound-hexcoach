@@ -100,14 +100,16 @@ working with tools attached.
 ### Embeddings and hybrid search
 
 Chunks and queries are embedded in-process with bge-small-en-v1.5 via fastembed's ONNX
-runtime — no external embedding API. The ~130 MB model downloads to the local HuggingFace
-cache on first use. `search` runs keyword (FTS) and vector (pgvector cosine) retrieval and
+runtime — no external embedding API. The model downloads to fastembed's cache on first
+use (`FASTEMBED_CACHE_PATH`, default `<tmp>/fastembed_cache`); the container image bakes it
+in. `search` runs keyword (FTS) and vector (pgvector cosine) retrieval and
 merges the two rankings with reciprocal rank fusion; `--keyword-only` skips the model.
 
 Memory footprint (matters for hosting): embedding a query costs about **270 MB RSS** for
 the whole Python process with the model loaded. Bulk ingestion peaks around **1.2 GB RSS**
 (batches of 32 passages; fastembed's default batch of 256 peaked near 7 GB) and takes
-roughly two minutes for the ~2,500 rule chunks on CPU.
+roughly two minutes for the ~2,500 rule chunks on CPU. The API process with the model
+loaded measured about **370 MB RSS** (see `docs/deployment.md`).
 
 `eval-retrieval` uploads the golden set (`data/golden/golden-set.yaml`, hand-written rulings
 with the Core Rules ids a correct answer must cite) to the Langfuse dataset `hexcoach-golden`
@@ -125,8 +127,8 @@ lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
 
 ### The HTTP API
 
-`serve` runs a FastAPI app (`backend/api/app.py`). Every endpoint needs the signed-in
-user's Supabase access token as `Authorization: Bearer <jwt>`. Tokens are verified
+`serve` runs a FastAPI app (`backend/api/app.py`). Every endpoint except `GET /health`
+needs the signed-in user's Supabase access token as `Authorization: Bearer <jwt>`. Tokens are verified
 against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, audience
 `authenticated`), so the backend holds no Supabase secret. Missing or bad tokens get a
 401, and so do anonymous-session tokens (real accounts only); a JWKS outage gets a 503.
@@ -149,6 +151,14 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   name and timestamp date all match, so each message has one score id and the backend
   resends the time feedback was first given: changing the vote replaces the score.
   Without Langfuse keys the vote is only stored.
+- `GET /health` is public and reads one row from the database: `{"status": "ok"}`, or a
+  503 when the database doesn't answer. The scheduled keep-alive workflow pings it so the
+  free Supabase project doesn't pause.
+- Browsers may call the API only from the origins in `CORS_ALLOWED_ORIGINS`
+  (comma-separated, none by default; the Vite dev server is `http://localhost:5173`).
+
+The API also ships as a container (`backend/Dockerfile`, same environment variables);
+`docs/deployment.md` covers the image, the measured memory and the hosting options.
 
 Decks are per account, with the same ownership rules (someone else's deck is a 404):
 
