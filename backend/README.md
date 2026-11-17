@@ -197,7 +197,7 @@ preview: if a provider fails halfway through a reply, the next provider starts o
 should replace the streamed text with `final.text`. `citations` are the retrieved chunks the
 answer actually cites (by rule number, FAQ title or card name), most authoritative source first,
 each with `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and `text`.
-`cards` is always empty for now (validated card tags arrive with issue #15). Error codes:
+`cards` holds the answer's validated card tags (below). Error codes:
 `providers_unavailable` (every provider in the chain failed), `conversation_deleted` (deleted
 while the answer was being written) and `internal`. On an error the player's message stays
 stored and no answer is.
@@ -248,6 +248,36 @@ data: {"text":"No - a battlefield scores once per turn (rule 472).","outcome":"a
 `-N` turns off curl's buffering so events print as they arrive. Idle stretches longer than 15
 seconds (a slow provider) get a `: ping` comment line, which SSE parsers ignore. Browsers can't
 use `EventSource` for a POST, so the frontend reads the stream with `fetch`.
+
+#### Card tags
+
+The answer prompt has the model write each card as a **Card tag**, `[[Card Name]]`. A tag is
+`[[`, then text with no square brackets, then `]]`; streamed tokens and `final.text` keep the
+markup as written. Once the answer is finished and stored, each tag is checked against the
+cards table with the same matcher as decklists (`cards/tags.py`): it validates only if it
+names a Card by oracle name or alias, ignoring case and surrounding spaces. Misspellings are
+never corrected to a near name. Each validated Card is one entry in `final.cards`, in order of
+first appearance:
+
+```json
+{"oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185", "oracle_name": "Pouty Poro",
+ "tags": ["Pouty Poro", "pouty poro"],
+ "image_url": "https://images.rifthunt.com/cards/normal/front/ogn/013/pouty-poro.webp",
+ "cleaned_text": "Deflect (Opponents must pay Rainbow Rune to choose me with a spell or ability.)"}
+```
+
+`tags` lists every distinct way the answer wrote that card (trimmed), so the client matches
+each `[[...]]` to an entry by its trimmed text; a tag listed in no entry renders as plain text.
+If the cards table can't be read at that point, `final` still arrives with `cards: []`.
+
+`image_url` is Rifthunt's "normal" (480 wide) WebP, hotlinked, with `cleaned_text` as the
+fallback when it fails to load. **Hotlinking `images.rifthunt.com` is still unverified as
+allowed**: Rifthunt's terms cover the image host but don't mention hotlinking (checked
+2026-11-17; the host does answer cross-origin requests). The URL shape is unverified too:
+Rifthunt documents these URLs only on its per-card API objects, not in the bulk snapshot, so
+`cards/images.py` rebuilds them from the stored set, collector number and name, which matched
+all 1110 Cards on 2026-11-17. Stored answers carry no card data: `GET /conversations/{id}`
+returns the text with its tags, not validated cards.
 
 #### Message limits
 

@@ -41,6 +41,9 @@ Rules for your answer:
 - Base the answer only on the evidence excerpts provided. Do not invent rules.
 - Cite your sources by name as you use them: rule numbers for Core Rules (for example
   "rule 472"), and the FAQ title for FAQ entries. Card text is cited by card name.
+- Write every card you mention as a card tag: its exact English name in double square
+  brackets, like [[Card Name]] (for example "[[Blazing Scorcher]] has Accelerate"). Tag
+  only cards, never rules, keywords or FAQ titles.
 - Source precedence: FAQ entries override card text, which overrides the Core Rules.
   If two FAQ entries conflict, the newer one (by date) wins.
 - Answer in the player's language ({language}). Keep card names and any quoted rule
