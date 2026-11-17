@@ -49,6 +49,17 @@ Rules for your answer:
 
 Message history is provided for context; answer the latest question."""
 
+TOOLS_NOTE = """\
+You can call the lookup_card tool to read any card's current text by name. Use it
+whenever the ruling depends on a card's exact text that is not already in the evidence.
+If lookup_card cannot find the card, say you do not know the card; never write card
+text from memory."""
+
+GRADE_TOOLS_NOTE = """\
+A card's exact text missing from the evidence is NOT a reason to grade weak: the
+answering step can read any card's current text from the card database by name. Grade
+on whether the governing rules and rulings are covered."""
+
 ABSTAIN_PROMPT = """\
 You are a Riftbound judge, but the retrieved evidence is not enough to answer this
 player's question confidently. Riftbound is Riot's trading card game.

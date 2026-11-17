@@ -10,6 +10,8 @@ and CI never need credentials.
 import hashlib
 from collections.abc import Sequence
 
+from langchain_core.tools import BaseTool
+
 from backend.agent.graph import AgentState, ChatModel, Retriever, Turn, run_agent
 from backend.config import optional_env
 
@@ -33,10 +35,11 @@ def traced_run(
     history: Sequence[Turn] = (),
     user_id: str | None = None,
     conversation_id: str | None = None,
+    tools: Sequence[BaseTool] = (),
 ) -> tuple[AgentState, str | None]:
     """Run the agent; return its final state and the Langfuse trace id (None untraced)."""
     if not tracing_enabled():
-        return run_agent(llm, retrieve, question, history), None
+        return run_agent(llm, retrieve, question, history, tools=tools), None
 
     from langfuse import get_client, propagate_attributes
     from langfuse.langchain import CallbackHandler
@@ -55,7 +58,7 @@ def traced_run(
     ):
         trace_id = langfuse.get_current_trace_id()
         state = run_agent(
-            llm, retrieve, question, history, config={"callbacks": [CallbackHandler()]}
+            llm, retrieve, question, history, config={"callbacks": [CallbackHandler()]}, tools=tools
         )
         span.update(output={"outcome": state["outcome"], "answer": state["answer"]})
     langfuse.flush()

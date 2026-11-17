@@ -12,14 +12,29 @@ per request with the conversation so far.
 import json
 import re
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+)
 from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph  # pyright: ignore[reportMissingTypeStubs]
 
-from backend.agent.prompts import ABSTAIN_PROMPT, ANSWER_PROMPT, GRADE_PROMPT, PREPARE_PROMPT
+from backend.agent.prompts import (
+    ABSTAIN_PROMPT,
+    ANSWER_PROMPT,
+    GRADE_PROMPT,
+    GRADE_TOOLS_NOTE,
+    PREPARE_PROMPT,
+    TOOLS_NOTE,
+)
 from backend.retrieval.precedence import order_by_precedence
 from backend.retrieval.repository import SearchHit
 
@@ -27,7 +42,16 @@ ChatModel = Runnable[LanguageModelInput, BaseMessage]
 Retriever = Callable[[str], Sequence[SearchHit]]
 """Takes an English search query, returns relevant chunks, best first."""
 
+
+@runtime_checkable
+class SupportsBindTools(Protocol):
+    """What an LLM must offer before build_agent can hand it tools (ProviderChain does)."""
+
+    def bind_tools(self, tools: Sequence[BaseTool]) -> ChatModel: ...
+
+
 MAX_RETRIEVALS = 2  # the first attempt plus exactly one corrective retry
+MAX_TOOL_ROUNDS = 3  # lookup rounds per answer; after this the model answers with what it has
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -109,8 +133,30 @@ def _conversation(state: AgentState) -> str:
     return "\n".join(f"{role}: {content}" for role, content in turns)
 
 
-def build_agent(llm: ChatModel, retrieve: Retriever) -> Any:
-    """The compiled graph. Invoke with {"question": ..., "history": [...]}."""
+def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] = ()) -> Any:
+    """The compiled graph. Invoke with {"question": ..., "history": [...]}.
+
+    `tools` are offered to the model only while it writes the final answer; the rest of
+    the pipeline (prepare, grade) stays deterministic JSON calls.
+    """
+    tool_by_name = {tool.name: tool for tool in tools}
+    if tools:
+        if not isinstance(llm, SupportsBindTools):
+            raise TypeError(f"{type(llm).__name__} cannot bind tools; pass tools=().")
+        answer_model: ChatModel = llm.bind_tools(tools)
+    else:
+        answer_model = llm
+
+    def run_tool(call: ToolCall) -> BaseMessage:
+        tool = tool_by_name.get(call["name"])
+        if tool is None:
+            known = ", ".join(sorted(tool_by_name))
+            return ToolMessage(
+                content=f"Unknown tool {call['name']!r}; the only tools are: {known}.",
+                tool_call_id=call["id"] or "",
+            )
+        # Invoking a tool with the ToolCall itself yields the matching ToolMessage.
+        return cast(BaseMessage, tool.invoke(call))
 
     def prepare(state: AgentState) -> _Update:
         reply = _json_call(llm, PREPARE_PROMPT, _conversation(state))
@@ -128,7 +174,10 @@ def build_agent(llm: ChatModel, retrieve: Retriever) -> Any:
 
     def grade(state: AgentState) -> _Update:
         prompt = f"Question:\n{_conversation(state)}\n\nEvidence:\n{format_evidence(state['hits'])}"
-        reply = _json_call(llm, GRADE_PROMPT, prompt)
+        # With lookup_card available, missing card text is fixable at answer time and
+        # must not push the grade to weak (and the abstain path that follows it).
+        system = f"{GRADE_PROMPT}\n\n{GRADE_TOOLS_NOTE}" if tools else GRADE_PROMPT
+        reply = _json_call(llm, system, prompt)
         update: _Update = {
             "grade": "strong" if reply.get("grade") == "strong" else "weak",
             "rewritten": False,
@@ -146,20 +195,34 @@ def build_agent(llm: ChatModel, retrieve: Retriever) -> Any:
             return "retrieve"  # the one corrective retry, and only with a rewritten query
         return "abstain"
 
-    def respond(state: AgentState, system_template: str, evidence_label: str) -> str:
+    def respond_messages(
+        state: AgentState, system_template: str, evidence_label: str, extra_system: str = ""
+    ) -> list[BaseMessage]:
         prompt = (
             f"Message history and question:\n{_conversation(state)}\n\n"
             f"{evidence_label}:\n{format_evidence(state['hits'])}"
         )
-        system = system_template.format(language=state["language"])
-        return llm.invoke([("system", system), ("user", prompt)]).text
+        system = system_template.format(language=state["language"]) + extra_system
+        return [SystemMessage(system), HumanMessage(prompt)]
 
     def answer(state: AgentState) -> _Update:
-        return {"answer": respond(state, ANSWER_PROMPT, "Evidence"), "outcome": "answered"}
+        extra = f"\n\n{TOOLS_NOTE}" if tools else ""
+        messages = respond_messages(state, ANSWER_PROMPT, "Evidence", extra)
+        for _ in range(MAX_TOOL_ROUNDS):
+            reply = answer_model.invoke(messages)
+            if not isinstance(reply, AIMessage) or not reply.tool_calls:
+                return {"answer": reply.text, "outcome": "answered"}
+            messages.append(reply)
+            messages.extend(run_tool(call) for call in reply.tool_calls)
+        # Still asking for lookups at the cap: force an answer from what it has.
+        final = llm.invoke(
+            [*messages, HumanMessage("Answer now using only the information you already have.")]
+        )
+        return {"answer": final.text, "outcome": "answered"}
 
     def abstain(state: AgentState) -> _Update:
-        text = respond(state, ABSTAIN_PROMPT, "Evidence that was found (insufficient)")
-        return {"answer": text, "outcome": "abstained"}
+        messages = respond_messages(state, ABSTAIN_PROMPT, "Evidence that was found (insufficient)")
+        return {"answer": llm.invoke(messages).text, "outcome": "abstained"}
 
     # langgraph ships no complete type stubs; add_node/compile are partially unknown.
     builder = StateGraph(AgentState)
@@ -185,8 +248,9 @@ def run_agent(
     question: str,
     history: Sequence[Turn] = (),
     config: RunnableConfig | None = None,
+    tools: Sequence[BaseTool] = (),
 ) -> AgentState:
     """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing)."""
-    agent = build_agent(llm, retrieve)
+    agent = build_agent(llm, retrieve, tools)
     initial = {"question": question, "history": list(history)}
     return cast(AgentState, agent.invoke(initial, config))

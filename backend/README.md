@@ -88,6 +88,14 @@ clarifying question or honestly declines instead of guessing. Prompts live in
 precedence. The graph takes message history as input, so the API can later run it fresh
 per request.
 
+While writing the answer the model can call the `lookup_card` tool (up to three rounds)
+to read any card's current text from the cards table by name or alias — real card text,
+never model memory. Unknown names come back with close-name suggestions, or an explicit
+"nothing similar, don't invent it". Each call shows up as a tool span in the Langfuse
+trace. The tool's data access is injected (`backend/agent/tools.py`), so it is tested
+against a fake card store, and `ProviderChain.bind_tools` keeps the provider failover
+working with tools attached.
+
 ### Embeddings and hybrid search
 
 Chunks and queries are embedded in-process with bge-small-en-v1.5 via fastembed's ONNX

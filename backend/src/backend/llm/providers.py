@@ -14,6 +14,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.tools import BaseTool
 from pydantic import SecretStr
 
 from backend.config import MissingConfigError, optional_env
@@ -38,19 +39,32 @@ class ProviderChain(Runnable[LanguageModelInput, BaseMessage]):
     """Tries each model in order; the first one that answers wins."""
 
     def __init__(
-        self, models: Sequence[tuple[str, BaseChatModel]], skipped: Sequence[str] = ()
+        self,
+        models: Sequence[tuple[str, BaseChatModel]],
+        skipped: Sequence[str] = (),
+        tools: Sequence[BaseTool] = (),
     ) -> None:
         if not models:
             raise ValueError("A provider chain needs at least one model.")
         self.models = list(models)
         self.skipped = list(skipped)
+        self.tools = list(tools)
+        self._invocable: list[tuple[str, Runnable[LanguageModelInput, BaseMessage]]] = (
+            [(provider, model.bind_tools(self.tools)) for provider, model in self.models]
+            if self.tools
+            else list(self.models)
+        )
+
+    def bind_tools(self, tools: Sequence[BaseTool]) -> "ProviderChain":
+        """A chain whose every model can call `tools`; the failover behaviour is unchanged."""
+        return ProviderChain(self.models, self.skipped, tools)
 
     def ask(
         self, input: LanguageModelInput, config: RunnableConfig | None = None
     ) -> tuple[str, BaseMessage]:
         """Like `invoke`, but also names the provider that answered."""
         failures: list[tuple[str, Exception]] = []
-        for provider, model in self.models:
+        for provider, model in self._invocable:
             try:
                 return provider, model.invoke(input, config)
             except Exception as error:

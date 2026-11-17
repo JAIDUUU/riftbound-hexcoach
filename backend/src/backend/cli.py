@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+    from sqlalchemy import Connection
+
     from backend.retrieval.repository import SearchHit
 
 from backend.cards.client_index import build_client_index
@@ -277,6 +280,19 @@ def _ping(args: argparse.Namespace) -> int:
     return 0
 
 
+def _card_lookup_tool(connection: "Connection") -> "BaseTool":
+    """The lookup_card tool backed by the cards table (issue #10)."""
+    from backend.agent.tools import make_lookup_card
+    from backend.cards.chunk_text import card_text_chunk
+    from backend.cards.repository import all_card_names, find_by_oracle_name
+
+    def find_card(name: str) -> str | None:
+        card = find_by_oracle_name(connection, name)
+        return card_text_chunk(card) if card else None
+
+    return make_lookup_card(find_card, lambda: all_card_names(connection))
+
+
 def _ask(args: argparse.Namespace) -> int:
     from backend.agent.tracing import traced_run, tracing_enabled
     from backend.db import make_engine
@@ -298,7 +314,9 @@ def _ask(args: argparse.Namespace) -> int:
                 connection, query, embedder().embed_query(query), limit=args.limit
             )
 
-        state, trace_id = traced_run(chain, retrieve, " ".join(args.question))
+        state, trace_id = traced_run(
+            chain, retrieve, " ".join(args.question), tools=[_card_lookup_tool(connection)]
+        )
     engine.dispose()
 
     print(state["answer"])
@@ -337,10 +355,18 @@ def _eval_agent(args: argparse.Namespace) -> int:
                 connection, query, embedder().embed_query(query), limit=args.limit
             )
 
+        lookup = _card_lookup_tool(connection)
+
         def ask(question: str) -> tuple[str, Outcome]:
             # run_experiment already opens a trace per item; adding traced_run's own
             # "ask" span inside it would just nest a redundant wrapper.
-            state = run_agent(chain, retrieve, question, config={"callbacks": [CallbackHandler()]})
+            state = run_agent(
+                chain,
+                retrieve,
+                question,
+                config={"callbacks": [CallbackHandler()]},
+                tools=[lookup],
+            )
             return state["answer"], state["outcome"]
 
         results = run_agent_experiment(client, items, ask, args.run_name)

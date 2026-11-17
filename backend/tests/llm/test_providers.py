@@ -4,6 +4,8 @@ from typing import Any
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.tools import tool
+from pydantic import Field
 
 import backend.config
 from backend.config import MissingConfigError
@@ -66,6 +68,36 @@ def test_when_every_provider_fails_the_error_names_them_all() -> None:
 def test_an_empty_chain_is_rejected() -> None:
     with pytest.raises(ValueError, match="at least one"):
         ProviderChain([])
+
+
+class _ToolBindingModel(FakeListChatModel):
+    """Records what gets bound; answering behaviour is unchanged."""
+
+    bound_tools: list[Any] = Field(default_factory=list)
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> "_ToolBindingModel":
+        self.bound_tools = list(tools)
+        return self
+
+
+def test_bind_tools_rebinds_every_model_and_keeps_the_failover_order() -> None:
+    @tool
+    def lookup_card(name: str) -> str:
+        """Fake card lookup."""
+        return name
+
+    first = _ToolBindingModel(responses=["pong"])
+    second = _ToolBindingModel(responses=["never"])
+    chain = ProviderChain([("gemini", first), ("groq", second)])
+
+    bound = chain.bind_tools([lookup_card])
+    provider, message = bound.ask("ping")
+
+    assert first.bound_tools == [lookup_card]
+    assert second.bound_tools == [lookup_card]
+    assert (provider, message.text()) == ("gemini", "pong")
+    assert chain.tools == []  # binding made a new chain; the original stays unbound
+    assert bound.tools == [lookup_card]
 
 
 def test_chain_specs_keep_colons_inside_model_ids() -> None:
