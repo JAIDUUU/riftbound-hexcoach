@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api.app import create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
+from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier
 from tests.conversations.memory_store import InMemoryConversationStore
@@ -29,6 +30,7 @@ def test_health_is_ok_without_a_token_when_the_database_answers() -> None:
             _open_store,
             open_decks=no_decks,
             coach=unused_coach,
+            delete_account=unused_account_deletion,
             ping_database=ping_database,
         )
     )
@@ -50,6 +52,7 @@ def test_health_is_a_503_when_the_database_is_unreachable() -> None:
             _open_store,
             open_decks=no_decks,
             coach=unused_coach,
+            delete_account=unused_account_deletion,
             ping_database=database_down,
         )
     )

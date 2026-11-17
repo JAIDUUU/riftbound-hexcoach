@@ -1,12 +1,13 @@
-"""The HTTP API (issues #11, #12, #16, #19): Supabase-authenticated conversations, streamed
-chat, feedback and decks.
+"""The HTTP API (issues #11, #12, #16, #19, #21): Supabase-authenticated conversations,
+streamed chat, feedback, decks and account deletion.
 
 `create_app` takes its collaborators (the token verifier, a way to open the conversation
-store and the decks for one request, the coach that answers messages, the Langfuse client
-feedback is scored with, and a database ping for `/health`), so tests build the app with
-fake keys, in-memory stores, a scripted coach and a fake Langfuse; `production_app` wires
-Supabase's JWKS, Postgres, the real agent, Langfuse and the CORS origins from the
-environment. Serve it with `uv run backend serve`.
+store and the decks for one request, the coach that answers messages, the account
+deletion, the Langfuse client feedback is scored with, and a database ping for `/health`),
+so tests build the app with fake keys, in-memory stores, a scripted coach, a recording
+account deletion and a fake Langfuse; `production_app` wires Supabase's JWKS, Postgres,
+the real agent, Langfuse and the CORS origins from the environment. Serve it with
+`uv run backend serve`.
 
 `/health` is public on purpose (issue #22): the scheduled keep-alive hits it so the free
 Supabase project sees a query and doesn't pause. It says only "ok" or 503.
@@ -69,6 +70,10 @@ _log = logging.getLogger(__name__)
 PingDatabase = Callable[[], None]
 """Runs one trivial query against the database; raises if it can't be reached."""
 
+DeleteAccount = Callable[[uuid.UUID], None]
+"""Deletes the user's Supabase Auth account, committed before it returns. Everything the
+user owns cascades from it; a user who is already gone is not an error."""
+
 
 @dataclass(frozen=True, slots=True)
 class DeckAccess:
@@ -88,6 +93,7 @@ class _Collaborators:
     open_store: OpenStore
     open_decks: OpenDecks
     coach: Coach
+    delete_account: DeleteAccount
     scores: ScoreClient | None
     ping_database: PingDatabase | None
 
@@ -429,6 +435,16 @@ def delete_deck(deck_id: uuid.UUID, user: User, access: Decks) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+account_router = APIRouter(prefix="/account")
+
+
+@account_router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+def delete_own_account(user: User, request: Request) -> Response:
+    """Deletes the signed-in user's own account. The confirmation step is the frontend's."""
+    _collaborators(request).delete_account(user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 class HealthOut(BaseModel):
     status: Literal["ok"]
 
@@ -463,6 +479,7 @@ def create_app(
     *,
     open_decks: OpenDecks,
     coach: Coach,
+    delete_account: DeleteAccount,
     scores: ScoreClient | None = None,
     ping_database: PingDatabase | None = None,
     cors_origins: Sequence[str] = (),
@@ -480,13 +497,14 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.collaborators = _Collaborators(
-        verifier, open_store, open_decks, coach, scores, ping_database
+        verifier, open_store, open_decks, coach, delete_account, scores, ping_database
     )
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
     app.add_exception_handler(MessageTooLongError, _message_too_long)
     app.include_router(router)
     app.include_router(decks_router)
+    app.include_router(account_router)
     app.include_router(health_router)
     return app
 
@@ -494,6 +512,7 @@ def create_app(
 def production_app() -> FastAPI:
     """The API wired to Supabase Auth, Postgres and the provider chain (an ASGI factory
     for uvicorn)."""
+    from backend.accounts import delete_account
     from backend.agent.coach import database_coach
     from backend.db import make_engine, ping_database
     from backend.llm.providers import chat_chain
@@ -511,11 +530,16 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield DeckAccess(SqlDeckStore(connection), SqlCardCatalog(connection))
 
+    def delete_user(user_id: uuid.UUID) -> None:
+        with engine.begin() as connection:
+            delete_account(connection, user_id)
+
     return create_app(
         supabase_verifier(supabase_url()),
         open_store,
         open_decks=open_decks,
         coach=database_coach(engine, chat_chain()),
+        delete_account=delete_user,
         scores=langfuse_scores(),
         ping_database=lambda: ping_database(engine),
         cors_origins=cors_allowed_origins(),
