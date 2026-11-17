@@ -3,7 +3,8 @@
 The player's message is already stored and checked by the time a turn runs (see
 `begin_turn` in messages.py), so everything here happens inside an open 200 stream. Events:
 `start` (the answer's message id and the trace id), `status` (a graph step began),
-`token` (a piece of the answer), then exactly one of `final` (the full text, citations
+`token` (a piece of the answer), `reset` (the text streamed so far was discarded; see
+`Reset`), then exactly one of `final` (the full text, citations
 and validated cards) or `error` (a typed, user-presentable reason). `start` is always
 first, even when the run fails before the trace exists.
 
@@ -29,7 +30,7 @@ from pydantic import BaseModel
 
 from backend.agent.citations import cited_evidence
 from backend.agent.coach import Coach, Question, Reply
-from backend.agent.graph import AgentEvent, Outcome, Started, Step, StepName, Token
+from backend.agent.graph import AgentEvent, Outcome, Reset, Started, Step, StepName, Token
 from backend.cards.catalog import CardCatalog
 from backend.cards.images import preview_image_url
 from backend.cards.tags import ValidatedCard, validate_card_tags
@@ -189,6 +190,8 @@ def run_turn(
                 emit(ServerSentEvent(event="status", data=StatusData(step=name)))
             case Token(text=text):
                 emit(ServerSentEvent(event="token", data=TokenData(text=text)))
+            case Reset():
+                emit(ServerSentEvent(event="reset", data={}))
 
     def fail(code: ErrorCode) -> None:
         try:

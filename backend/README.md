@@ -187,14 +187,19 @@ limit, below). Once the response is a 200, the events are:
 | `start`  | `message_id`, `trace_id` (null when untraced)         | always first                            |
 | `status` | `step`: `prepare`, `retrieve`, `grade`, `answer` or `abstain` | as each graph step begins; a corrective retry repeats `retrieve` and `grade` |
 | `token`  | `text`                                                | while the answer is written             |
+| `reset`  | `{}`                                                  | the text streamed so far was discarded  |
 | `final`  | `text`, `outcome` (`answered`/`abstained`), `citations`, `cards` | last, on success                 |
 | `error`  | `code`, `message` (safe to show the player)           | last, on failure                        |
 
 `message_id` is the assistant message's id, and the answer is stored under it together with the
 trace id just before `final` is sent, so the feedback endpoint above accepts a vote on it once
 `final` has arrived (earlier it is a 404). Streamed tokens are a
-preview: if a provider fails halfway through a reply, the next provider starts over, so the client
-should replace the streamed text with `final.text`. `citations` are the retrieved chunks the
+preview. On `reset` the client clears the text streamed so far and starts again from the next
+`token`: the agent sends it when a reply it was writing is thrown away, because the provider
+failed halfway through (the next provider starts over) or because the model wrote some text and
+then looked a card up instead of answering. `reset` is only sent after some text was streamed.
+`final.text` is the authoritative answer, so the client replaces the streamed text with it.
+`citations` are the retrieved chunks the
 answer actually cites (by rule number, FAQ title or card name), most authoritative source first,
 each with `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and `text`.
 `cards` holds the answer's validated card tags (below). Error codes:
@@ -236,6 +241,12 @@ event: status
 data: {"step":"answer"}
 
 event: token
+data: {"text":"Let me check"}
+
+event: reset
+data: {}
+
+event: token
 data: {"text":"No"}
 
 event: token
@@ -245,7 +256,8 @@ event: final
 data: {"text":"No - a battlefield scores once per turn (rule 472).","outcome":"answered","citations":[{"source_type":"rules","rule_id":"472","title":null,"section":"Scoring","source_date":"2026-10-09","source_url":null,"text":"..."}],"cards":[]}
 ```
 
-`-N` turns off curl's buffering so events print as they arrive. Idle stretches longer than 15
+Here the model started writing, then looked a card up (`reset`), then answered. `-N` turns
+off curl's buffering so events print as they arrive. Idle stretches longer than 15
 seconds (a slow provider) get a `: ping` comment line, which SSE parsers ignore. Browsers can't
 use `EventSource` for a POST, so the frontend reads the stream with `fetch`.
 

@@ -1,3 +1,5 @@
+import json
+import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import replace
 from datetime import date
@@ -7,7 +9,8 @@ import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
+from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
@@ -16,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from backend.agent.graph import (
     AgentEvent,
+    Reset,
     Step,
     Token,
     format_evidence,
@@ -509,3 +513,94 @@ def test_with_tools_the_grader_is_told_card_text_is_fixable(zhonyas: RecordingCa
 
     assert "NOT a reason to grade weak" in with_tools.prompts[1]  # the grade call
     assert "NOT a reason to grade weak" not in without_tools.prompts[1]
+
+
+def _spans(events: Sequence[AgentEvent]) -> list[str]:
+    """The streamed text between resets: what the client shows, then discards."""
+    spans = [""]
+    for event in events:
+        if isinstance(event, Reset):
+            spans.append("")
+        elif isinstance(event, Token):
+            spans[-1] += event.text
+    return spans
+
+
+def test_a_reply_cut_off_by_a_provider_failure_is_reset_before_the_next_provider_streams() -> None:
+    class DropsMidAnswer(GenericFakeChatModel):
+        streams: int = 0
+
+        def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
+            self.streams += 1
+            for i, chunk in enumerate(super()._stream(*args, **kwargs)):
+                if self.streams == 3 and i == 2:  # the answer, two words in
+                    raise ConnectionError("connection dropped")
+                yield chunk
+
+    retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
+    dropped = "Yes, you can score twice."
+    chain = ProviderChain(
+        [
+            ("a", DropsMidAnswer(messages=iter([PREPARE, STRONG, dropped]))),
+            ("b", GenericFakeChatModel(messages=iter(["No - only once per turn."]))),
+        ]
+    )
+    events: list[AgentEvent] = []
+
+    state = run_agent(chain, retriever, "Can I score twice?", on_event=events.append)
+
+    cut_off, answer = _spans(events)
+    assert cut_off and dropped.startswith(cut_off)
+    assert answer == state["answer"] == "No - only once per turn."
+
+
+class _StreamingToolModel(GenericFakeChatModel):
+    """Streams its replies word by word, tool calls included, and can be bound to tools."""
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Any:
+        return self
+
+    def _stream(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Iterator[ChatGenerationChunk]:
+        reply = next(self.messages)
+        message = AIMessage(reply) if isinstance(reply, str) else reply
+        for word in re.split(r"(\s)", message.text):
+            chunk = ChatGenerationChunk(message=AIMessageChunk(content=word))
+            if run_manager is not None:
+                run_manager.on_llm_new_token(word, chunk=chunk)
+            yield chunk
+        if message.tool_calls:
+            calls = [
+                tool_call_chunk(name=c["name"], args=json.dumps(c["args"]), id=c["id"], index=i)
+                for i, c in enumerate(message.tool_calls)
+            ]
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=calls))
+
+
+def test_text_written_before_a_tool_call_is_reset_once_the_call_is_made(
+    zhonyas: RecordingCatalog,
+) -> None:
+    retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
+    looking = AIMessage(
+        "Let me check Zhonya's Hourglass.",
+        tool_calls=[{"name": "lookup_card", "args": {"name": "Zhonya's Hourglass"}, "id": "c1"}],
+    )
+    silent = _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}, "c2")
+    model = _StreamingToolModel(
+        messages=iter([PREPARE, STRONG, looking, silent, "No, it only grants Deflect."])
+    )
+    events: list[AgentEvent] = []
+
+    state = run_agent(
+        ProviderChain([("fake", model)]),
+        retriever,
+        "Does Zhonya's stop the score?",
+        tools=[make_lookup_card(zhonyas)],
+        on_event=events.append,
+    )
+
+    assert zhonyas.lookups == ["Zhonya's Hourglass", "Zhonya's Hourglass"]
+    # The silent second round streamed nothing, so it has nothing to reset.
+    assert _spans(events) == ["Let me check Zhonya's Hourglass.", state["answer"]]
+    assert state["answer"] == "No, it only grants Deflect."

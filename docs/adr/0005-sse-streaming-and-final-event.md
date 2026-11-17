@@ -7,7 +7,8 @@ Answers should stream, but `[[Card]]` tags can only be validated against the car
 
 ## Decision
 - Transport: SSE over `POST /conversations/{id}/messages`, consumed with `fetch`. The frontend sends the Supabase JWT and the backend verifies it.
-- Events: `start` (message id and trace id), `status` (graph step), `token`, `final` (full text, validated cards, citations) and `error`.
+- Events: `start` (message id and trace id), `status` (graph step), `token`, `reset`, `final` (full text, validated cards, citations) and `error`.
+- `reset` (added 2026-11-17, after review) tells the client to discard the text streamed so far. The agent sends it when a reply it was streaming is thrown away: a provider failed mid-reply and the next one starts over, or the model wrote text and then called a tool instead of answering. Without it the client would show two replies run together until `final` arrived.
 - Validation happens once at the end of generation. During streaming the UI hides the `[[ ]]` markup. On `final`, validated cards become hover previews and unvalidated tags render as plain text.
 
 ## Consequences

@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.agent.coach import Reply
-from backend.agent.graph import AgentEvent, Outcome, Started, Step, Token
+from backend.agent.graph import AgentEvent, Outcome, Reset, Started, Step, Token
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
@@ -802,3 +802,15 @@ def test_a_client_gone_before_the_stream_opens_gets_its_slot_back(
     assert detail is not None and [m.content for m in detail.messages] == ["Anyone there?"]
     again = store.create(ALICE, None)
     assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
+
+
+def test_a_discarded_reply_streams_a_reset_and_only_the_text_after_it_is_the_answer(
+    store: InMemoryConversationStore,
+) -> None:
+    run = [Started(None), Step("answer"), Token("Yes, you "), Reset(), Token("No.")]
+
+    events = _ask(store, FakeCoach(run, Reply("No.", "answered", ())))
+
+    assert [e.event for e in events] == ["start", "status", "token", "reset", "token", "final"]
+    assert events[3].data == {}
+    assert events[-1].data["text"] == "No."

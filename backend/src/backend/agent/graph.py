@@ -11,10 +11,12 @@ per request with the conversation so far.
 
 import json
 import re
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import (
     AIMessage,
@@ -24,8 +26,11 @@ from langchain_core.messages import (
     ToolCall,
     ToolMessage,
 )
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
+from langgraph.config import get_stream_writer  # pyright: ignore[reportMissingTypeStubs]
 from langgraph.graph import END, START, StateGraph  # pyright: ignore[reportMissingTypeStubs]
 
 from backend.agent.prompts import (
@@ -84,14 +89,20 @@ class Step:
 
 @dataclass(frozen=True, slots=True)
 class Token:
-    """A piece of the reply as the model streams it. The streamed pieces are a preview:
-    a provider failing mid-reply restarts it on the next one, so only the final state's
-    answer is authoritative."""
+    """A piece of the reply as the model streams it. The streamed pieces are a preview
+    (a `Reset` discards them), so only the final state's answer is authoritative."""
 
     text: str
 
 
-AgentEvent = Started | Step | Token
+@dataclass(frozen=True, slots=True)
+class Reset:
+    """The reply streamed so far was discarded: a provider failed mid-reply (the next one
+    starts over), or the model wrote text and then called a tool instead of answering.
+    Tokens after it start the reply afresh. Only sent once some text was streamed."""
+
+
+AgentEvent = Started | Step | Token | Reset
 OnEvent = Callable[[AgentEvent], None]
 
 
@@ -294,6 +305,60 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
     return builder.compile()  # pyright: ignore[reportUnknownMemberType]
 
 
+_DISCARDED = "reply_discarded"
+"""What `_DiscardWatcher` writes to the run's custom stream."""
+
+
+class _DiscardWatcher(BaseCallbackHandler):
+    """Spots a spoken reply being thrown away: its model call failed (the provider chain
+    moves on to the next provider), or it ended in tool calls (the answer comes from a
+    later call). Each model call is its own run, so runs are told apart by id.
+
+    It signals through the graph's stream writer rather than calling back directly, so the
+    signal reaches `run_agent` in order with the tokens already streamed.
+    """
+
+    run_inline = True  # in the node's thread and context, where the stream writer lives
+
+    def __init__(self) -> None:
+        self.spoken: set[uuid.UUID] = set()
+
+    def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
+        *,
+        run_id: uuid.UUID,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if (metadata or {}).get("langgraph_node") in _SPOKEN_STEPS:
+            self.spoken.add(run_id)
+
+    def on_llm_end(self, response: LLMResult, *, run_id: uuid.UUID, **kwargs: Any) -> None:
+        if run_id in self.spoken and any(
+            isinstance(generation, ChatGeneration)
+            and isinstance(generation.message, AIMessage)
+            and generation.message.tool_calls
+            for generations in response.generations
+            for generation in generations
+        ):
+            self._discarded(run_id)
+
+    def on_llm_error(self, error: BaseException, *, run_id: uuid.UUID, **kwargs: Any) -> None:
+        if run_id in self.spoken:
+            self._discarded(run_id)
+
+    def _discarded(self, run_id: uuid.UUID) -> None:
+        self.spoken.discard(run_id)
+        get_stream_writer()(_DISCARDED)
+
+
+def _watching_discards(config: RunnableConfig | None) -> RunnableConfig:
+    """`config` with a `_DiscardWatcher` added to its callbacks."""
+    return merge_configs(config, {"callbacks": [_DiscardWatcher()]})
+
+
 def run_agent(
     llm: ChatModel,
     retrieve: Retriever,
@@ -307,8 +372,9 @@ def run_agent(
     """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing).
 
     With `on_event`, the run is streamed: a `Step` as each node begins and `Token`s as
-    the answer (or the clarifying question) is written. Tokens only flow from models that
-    stream, which real chat models do whenever someone is listening.
+    the answer (or the clarifying question) is written, with a `Reset` whenever the text
+    streamed so far is thrown away (see `_DiscardWatcher`). Tokens only flow from models
+    that stream, which real chat models do whenever someone is listening.
     """
     agent = build_agent(llm, retrieve, tools)
     initial = {"question": question, "history": list(history), "mentions": list(mentions)}
@@ -316,9 +382,10 @@ def run_agent(
         return cast(AgentState, agent.invoke(initial, config))
 
     final: Any = None
+    streamed = False  # since the last reset
     # langgraph ships no complete type stubs; the stream's items are untyped tuples.
     for mode, payload in agent.stream(  # pyright: ignore[reportUnknownVariableType]
-        initial, config, stream_mode=["tasks", "messages", "values"]
+        initial, _watching_discards(config), stream_mode=["tasks", "messages", "custom", "values"]
     ):
         if mode == "tasks" and "input" in payload:  # a task start; its end carries "result"
             on_event(Step(payload["name"]))
@@ -329,7 +396,11 @@ def run_agent(
                 and isinstance(chunk, AIMessage)
                 and chunk.text
             ):
+                streamed = True
                 on_event(Token(chunk.text))
+        elif mode == "custom" and payload == _DISCARDED and streamed:
+            streamed = False
+            on_event(Reset())
         elif mode == "values":
             final = payload
     return cast(AgentState, final)
