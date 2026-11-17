@@ -10,7 +10,13 @@ from datetime import UTC, datetime, timedelta
 
 from backend.agent.graph import Role, Turn
 from backend.conversations.limits import Limits
-from backend.conversations.store import Conversation, ConversationDetail, Message
+from backend.conversations.store import (
+    Conversation,
+    ConversationDetail,
+    Feedback,
+    Message,
+    Rating,
+)
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -85,3 +91,21 @@ class InMemoryConversationStore:
             return None
         recent = row.messages[-self.limits.max_history_messages :]
         return [(message.role, message.content) for message in recent]
+
+    def give_feedback(
+        self,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        message_id: uuid.UUID,
+        rating: Rating,
+    ) -> Message | None:
+        row = self._owned(user_id, conversation_id)
+        if row is None:
+            return None
+        for index, message in enumerate(row.messages):
+            if message.id == message_id:
+                given_at = self._now() if message.feedback is None else message.feedback.given_at
+                rated = replace(message, feedback=Feedback(rating=rating, given_at=given_at))
+                row.messages[index] = rated
+                return rated
+        return None

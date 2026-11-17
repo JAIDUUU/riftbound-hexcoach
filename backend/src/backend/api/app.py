@@ -1,9 +1,9 @@
-"""The HTTP API (issue #11): Supabase-authenticated conversations.
+"""The HTTP API (issue #11): Supabase-authenticated conversations, and feedback (#19).
 
-`create_app` takes its collaborators (the token verifier and a way to open a
-conversation store for one request), so tests build the app with fake keys and an
-in-memory store; `production_app` wires Supabase's JWKS and Postgres. Serve it with
-`uv run backend serve`.
+`create_app` takes its collaborators (the token verifier, a way to open a conversation
+store for one request, and the Langfuse client feedback is scored with), so tests build
+the app with fake keys, an in-memory store and a fake Langfuse; `production_app` wires
+Supabase's JWKS, Postgres and Langfuse. Serve it with `uv run backend serve`.
 """
 
 import uuid
@@ -19,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from backend.agent.graph import Role
+from backend.agent.tracing import ScoreClient, langfuse_scores, score_feedback
 from backend.api.auth import (
     AuthenticatedUser,
     AuthError,
@@ -32,6 +33,8 @@ from backend.conversations.store import (
     Conversation,
     ConversationDetail,
     ConversationStore,
+    Message,
+    Rating,
     SqlConversationStore,
 )
 
@@ -43,6 +46,7 @@ OpenStore = Callable[[], AbstractContextManager[ConversationStore]]
 class _Collaborators:
     verifier: TokenVerifier
     open_store: OpenStore
+    scores: ScoreClient | None
 
 
 def _collaborators(request: Request) -> _Collaborators:
@@ -77,10 +81,15 @@ def conversation_store(request: Request) -> Generator[ConversationStore]:
         yield store
 
 
+def score_client(request: Request) -> ScoreClient | None:
+    return _collaborators(request).scores
+
+
 User = Annotated[AuthenticatedUser, Depends(current_user)]
 # scope="function": the transaction commits before the response is sent, so a failed
 # commit can never hide behind a 2xx the client already received.
 Store = Annotated[ConversationStore, Depends(conversation_store, scope="function")]
+Scores = Annotated[ScoreClient | None, Depends(score_client)]
 
 
 class ConversationIn(BaseModel):
@@ -109,6 +118,18 @@ class MessageOut(BaseModel):
     content: str
     trace_id: str | None
     created_at: datetime
+    feedback: Rating | None
+
+    @classmethod
+    def of(cls, message: Message) -> "MessageOut":
+        return cls(
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            trace_id=message.trace_id,
+            created_at=message.created_at,
+            feedback=None if message.feedback is None else message.feedback.rating,
+        )
 
 
 class ConversationDetailOut(ConversationOut):
@@ -118,17 +139,12 @@ class ConversationDetailOut(ConversationOut):
     def of_detail(cls, detail: ConversationDetail) -> "ConversationDetailOut":
         return cls(
             **ConversationOut.of(detail.conversation).model_dump(),
-            messages=[
-                MessageOut(
-                    id=message.id,
-                    role=message.role,
-                    content=message.content,
-                    trace_id=message.trace_id,
-                    created_at=message.created_at,
-                )
-                for message in detail.messages
-            ],
+            messages=[MessageOut.of(message) for message in detail.messages],
         )
+
+
+class FeedbackIn(BaseModel):
+    rating: Rating
 
 
 def _not_found() -> HTTPException:
@@ -165,15 +181,35 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.put("/{conversation_id}/messages/{message_id}/feedback")
+def give_feedback(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: FeedbackIn,
+    user: User,
+    store: Store,
+    scores: Scores,
+) -> MessageOut:
+    message = store.give_feedback(user.id, conversation_id, message_id, body.rating)
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    if scores is not None and message.trace_id is not None:
+        score_feedback(scores, message.trace_id, body.rating)
+    return MessageOut.of(message)
+
+
 def _message_too_long(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
     )
 
 
-def create_app(verifier: TokenVerifier, open_store: OpenStore) -> FastAPI:
+def create_app(
+    verifier: TokenVerifier, open_store: OpenStore, scores: ScoreClient | None = None
+) -> FastAPI:
+    """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored."""
     app = FastAPI(title="HexCoach API")
-    app.state.collaborators = _Collaborators(verifier, open_store)
+    app.state.collaborators = _Collaborators(verifier, open_store, scores)
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
     app.add_exception_handler(MessageTooLongError, _message_too_long)
@@ -193,4 +229,4 @@ def production_app() -> FastAPI:
         with engine.begin() as connection:
             yield SqlConversationStore(connection, limits)
 
-    return create_app(supabase_verifier(supabase_url()), open_store)
+    return create_app(supabase_verifier(supabase_url()), open_store, langfuse_scores())

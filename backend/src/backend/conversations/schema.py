@@ -1,4 +1,5 @@
-"""SQLAlchemy Core definitions of `conversations` and `messages` (mirrored by migration 0006).
+"""SQLAlchemy Core definitions of `conversations` and `messages` (mirrored by migrations
+0006 and 0009).
 
 The `user_id -> auth.users` foreign key lives only in the migration: auth.users belongs
 to Supabase and is not part of our metadata.
@@ -54,7 +55,18 @@ messages_table = Table(
     Column("content", Text, nullable=False),
     Column("trace_id", Text),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False, server_default=_CLOCK),
+    Column("feedback", Text),
+    Column("feedback_given_at", TIMESTAMP(timezone=True)),
     CheckConstraint("role IN ('user', 'assistant')", name="ck_messages_role"),
+    CheckConstraint(
+        "(feedback IS NULL AND feedback_given_at IS NULL)"
+        " OR (feedback IN ('up', 'down') AND feedback_given_at IS NOT NULL)",
+        name="ck_messages_feedback",
+    ),
+    CheckConstraint(
+        "feedback IS NULL OR (role = 'assistant' AND trace_id IS NOT NULL)",
+        name="ck_messages_feedback_target",
+    ),
 )
 
 Index("ix_messages_conversation_seq", messages_table.c.conversation_id, messages_table.c.seq)
