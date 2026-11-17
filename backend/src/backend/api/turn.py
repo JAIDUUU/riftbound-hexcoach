@@ -202,6 +202,11 @@ def run_turn(
     question = turn.question
     try:
         reply = coach(question, on_event)
+        # Built before the answer is stored, so a reply that can't become a `final`
+        # leaves nothing stored and fails like any other run.
+        final = FinalData(
+            text=reply.answer, outcome=reply.outcome, citations=citations(reply), cards=[]
+        )
         with open_store() as store:
             saved = store.add_message(
                 question.user_id,
@@ -222,12 +227,7 @@ def run_turn(
     if saved is None:
         fail("conversation_deleted")
         return
-    final = FinalData(
-        text=reply.answer,
-        outcome=reply.outcome,
-        citations=citations(reply),
-        cards=validated_cards(reply.answer, open_cards),
-    )
+    final.cards = validated_cards(reply.answer, open_cards)  # never raises
     emit(ServerSentEvent(event="final", data=final))
 
 

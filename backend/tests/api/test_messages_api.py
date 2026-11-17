@@ -4,13 +4,13 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.agent.coach import Reply
-from backend.agent.graph import AgentEvent, Started, Step, Token
+from backend.agent.graph import AgentEvent, Outcome, Started, Step, Token
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
@@ -673,3 +673,21 @@ def test_a_turn_after_a_mentioning_one_sees_its_text_but_not_its_mentions(
     [question] = second.questions
     assert question.history == (("user", "Does she ready runes?"), ("assistant", "Yes."))
     assert question.mentions == ()
+
+
+def test_a_failure_while_building_final_ends_in_error_stores_nothing_and_refunds(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    quota = _quota(per_minute=1, per_day=1)
+    unbuildable = Reply("a", cast(Outcome, "shrugged"), ())  # FinalData refuses the outcome
+    events = parse_sse(
+        _send(store, FakeCoach([Started(None)], unbuildable), quota, conversation.id).text
+    )
+
+    assert [e.event for e in events] == ["start", "error"]
+    assert events[-1].data["code"] == "internal"
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None and [m.role for m in detail.messages] == ["user"]
+    again = store.create(ALICE, None)
+    assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
