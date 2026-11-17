@@ -30,7 +30,7 @@ _CLIENT_SEQUENCE_GRANTS = text(
 def test_every_public_table_has_row_level_security(db_connection: Connection) -> None:
     tables = dict(db_connection.execute(_PUBLIC_TABLES).tuples().all())
 
-    assert {"cards", "chunks", "conversations", "messages", "decks"} <= tables.keys()
+    assert {"cards", "chunks", "conversations", "messages", "decks", "daily_usage"} <= tables.keys()
     assert [name for name, protected in tables.items() if not protected] == []
 
 
