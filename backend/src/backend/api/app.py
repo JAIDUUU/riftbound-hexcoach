@@ -38,7 +38,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
 from backend.agent.coach import Coach, Question
-from backend.agent.graph import Role
+from backend.agent.graph import Mentioned, Role
 from backend.agent.tracing import ScoreClient, langfuse_scores, score_feedback
 from backend.api.auth import (
     AuthenticatedUser,
@@ -50,7 +50,13 @@ from backend.api.auth import (
 from backend.api.turn import OpenStore, PreparedTurn, stream_turn
 from backend.cards.catalog import CardCatalog, SqlCardCatalog
 from backend.config import cors_allowed_origins, supabase_url
-from backend.conversations.limits import MAX_TITLE_CHARS, MessageTooLongError, limits_from_env
+from backend.conversations.limits import (
+    MAX_TITLE_CHARS,
+    Limits,
+    MessageTooLongError,
+    TooManyMentionsError,
+    limits_from_env,
+)
 from backend.conversations.store import (
     Conversation,
     ConversationDetail,
@@ -70,6 +76,7 @@ from backend.decks.importing import (
 from backend.decks.parse import SECTIONS, Section
 from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckStore
 from backend.decks.warnings import WarningKind
+from backend.mentions import Mention, MentionKind, UnknownMentionError, resolve_mentions
 from backend.quota.admission import MessageQuota, QuotaExceededError, quota_settings_from_env
 from backend.quota.store import SqlUsageStore, UsageStore
 
@@ -113,6 +120,7 @@ class _Collaborators:
     delete_account: DeleteAccount
     scores: ScoreClient | None
     ping_database: PingDatabase | None
+    limits: Limits
     quota: MessageQuota | None
 
 
@@ -256,10 +264,35 @@ def _count_against_quota(request: Request, user: AuthenticatedUser) -> None:
         quota.admit(user.id)
 
 
+class MentionIn(BaseModel):
+    """An @ mention: a Card by its oracle id (the client card index's `id`), or a Deck."""
+
+    kind: MentionKind
+    id: uuid.UUID
+
+
 class MessageIn(BaseModel):
     """A player message. The length cap is configuration, enforced by the store."""
 
     content: str = Field(min_length=1)
+    mentions: list[MentionIn] = Field(default_factory=list[MentionIn])
+
+
+def _mentioned(
+    request: Request, user_id: uuid.UUID, mentions: Sequence[MentionIn]
+) -> tuple[Mentioned, ...]:
+    """The message's mentions, resolved; over the cap or unresolvable is a 422."""
+    if not mentions:
+        return ()
+    collaborators = _collaborators(request)
+    try:
+        collaborators.limits.check_mentions(len(mentions))
+        with collaborators.open_decks() as access:
+            return resolve_mentions(
+                [Mention(m.kind, m.id) for m in mentions], user_id, access.decks, access.cards
+            )
+    except (TooManyMentionsError, UnknownMentionError) as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
 
 
 def begin_turn(
@@ -267,20 +300,23 @@ def begin_turn(
 ) -> PreparedTurn:
     """Every check that can refuse a message, run before the event stream opens so a
     refusal is a plain HTTP error rather than an `error` event inside a 200: the player
-    must be within their message limits (429), the conversation must be the user's (404)
-    and the message must fit the cap (422). The player's message is committed here; the
-    answer is stored when it is ready."""
+    must be within their message limits (429), the conversation must be the user's (404),
+    the message must fit the cap (422) and its mentions must resolve to Cards and the
+    user's own Decks (422). The player's message is committed here; the answer is stored
+    when it is ready."""
     _count_against_quota(request, user)
     with _collaborators(request).open_store() as store:
         history = store.history(user.id, conversation_id)
         if history is None:
             raise _not_found()
+        mentions = _mentioned(request, user.id, body.mentions)
         store.add_message(user.id, conversation_id, "user", body.content)
     question = Question(
         text=body.content,
         history=tuple(history),
         user_id=user.id,
         conversation_id=conversation_id,
+        mentions=mentions,
     )
     return PreparedTurn(question=question, answer_id=uuid.uuid4())
 
@@ -526,12 +562,15 @@ def create_app(
     scores: ScoreClient | None = None,
     ping_database: PingDatabase | None = None,
     cors_origins: Sequence[str] = (),
+    limits: Limits | None = None,
     quota: MessageQuota | None = None,
 ) -> FastAPI:
     """`scores` is None when Langfuse isn't configured: feedback is then stored, not scored.
 
     `ping_database` None means there is no database to check (tests of other endpoints),
     and `quota` None means messages are not limited per player (likewise).
+    `limits` holds the caps the API checks itself (mentions per message; the store
+    enforces the message and history caps); None means the defaults.
     """
     app = FastAPI(title="HexCoach API")
     # The frontend authenticates with a bearer header, never cookies, so no credentials mode.
@@ -542,7 +581,15 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.collaborators = _Collaborators(
-        verifier, open_store, open_decks, coach, delete_account, scores, ping_database, quota
+        verifier,
+        open_store,
+        open_decks,
+        coach,
+        delete_account,
+        scores,
+        ping_database,
+        limits or Limits(),
+        quota,
     )
     # App-wide: the caps are enforced in the store and in import_decklist, so any endpoint
     # that takes a player message or decklist gets a clear 422 rather than a 500.
@@ -598,5 +645,6 @@ def production_app() -> FastAPI:
         scores=langfuse_scores(),
         ping_database=lambda: ping_database(engine),
         cors_origins=cors_allowed_origins(),
+        limits=limits,
         quota=MessageQuota(quota_settings_from_env(), open_usage),
     )

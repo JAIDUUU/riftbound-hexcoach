@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import Any
 
-from sqlalchemy import Connection, delete, text
+from sqlalchemy import Connection, delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from backend.cards.collapse import Card
@@ -62,6 +62,12 @@ def sync_cards(connection: Connection, cards: Sequence[Card]) -> int:
 def find_by_oracle_name(connection: Connection, name: str) -> Card | None:
     """Find a card by oracle name or alias, ignoring case. Printings never matter."""
     row = connection.execute(_FIND_BY_NAME, {"name": name.strip().lower()}).mappings().first()
+    return _card_from_row(dict(row)) if row else None
+
+
+def find_by_oracle_id(connection: Connection, oracle_id: uuid.UUID) -> Card | None:
+    statement = select(cards_table).where(cards_table.c.oracle_id == oracle_id)
+    row = connection.execute(statement).mappings().first()
     return _card_from_row(dict(row)) if row else None
 
 

@@ -2,7 +2,8 @@
 
 Three LLM roles: prepare the retrieval query, grade the evidence, and write the final
 answer (or the abstention). All three see the same evidence formatting, produced by
-`format_evidence` in graph.py.
+`format_evidence` in graph.py, and the same @-mentioned cards and decks after the
+conversation (`format_mentions`, introduced by MENTIONS_NOTE).
 """
 
 PREPARE_PROMPT = """\
@@ -59,6 +60,12 @@ GRADE_TOOLS_NOTE = """\
 A card's exact text missing from the evidence is NOT a reason to grade weak: the
 answering step can read any card's current text from the card database by name. Grade
 on whether the governing rules and rulings are covered."""
+
+MENTIONS_NOTE = """\
+The player explicitly referenced these cards and decks with @ in their latest message.
+A card's text below is its current text from the card database: treat it as card-text
+evidence and cite it by card name. A deck is listed as card names only, without counts
+or card text."""
 
 ABSTAIN_PROMPT = """\
 You are a Riftbound judge, but the retrieved evidence is not enough to answer this

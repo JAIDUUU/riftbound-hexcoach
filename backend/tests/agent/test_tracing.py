@@ -7,7 +7,7 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable, RunnableConfig
 
-from backend.agent.graph import AgentEvent, Started, Step
+from backend.agent.graph import AgentEvent, MentionedCard, Started, Step
 from backend.agent.tracing import hash_user_id, traced_run, tracing_enabled
 from backend.retrieval.repository import SearchHit
 
@@ -68,6 +68,21 @@ def test_an_untraced_run_still_works_and_returns_no_trace_id(no_langfuse_keys: N
     assert trace_id is None
     assert state["outcome"] == "answered"
     assert state["answer"] == "No (rule 472)."
+
+
+def test_a_run_carries_the_questions_mentions(no_langfuse_keys: None) -> None:
+    llm = ScriptedLLM(
+        [
+            '{"query": "sona ready runes", "language": "en"}',
+            '{"grade": "strong", "rewritten_query": null}',
+            "Yes.",
+        ]
+    )
+    sona = MentionedCard(name="Sona, Harmonious", text="Ready up to 4 friendly runes.")
+
+    state, _ = traced_run(llm, lambda query: [], "Does she ready runes?", mentions=[sona])
+
+    assert state["mentions"] == [sona]
 
 
 def test_an_untraced_streamed_run_announces_its_missing_trace_id_first(

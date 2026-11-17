@@ -178,9 +178,9 @@ The API also ships as a container (`backend/Dockerfile`, same environment variab
 message, runs the agent fresh on the conversation so far (the most recent
 `MAX_HISTORY_MESSAGES` messages), and streams the answer as server-sent events
 ([ADR 0005](../docs/adr/0005-sse-streaming-and-final-event.md)). Refusals happen before
-the stream opens, so they are plain HTTP errors: 401 (token), 429 (a message limit, below),
-404 (not your conversation), 422 (empty or over the length cap). Once the response is a 200,
-the events are:
+the stream opens, so they are plain HTTP errors: 401 (token), 404 (not your
+conversation), 422 (empty or over the length cap, or a bad mention, below), 429 (a message
+limit, below). Once the response is a 200, the events are:
 
 | Event    | Data                                                  | When                                    |
 | -------- | ----------------------------------------------------- | --------------------------------------- |
@@ -201,6 +201,16 @@ each with `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_u
 `providers_unavailable` (every provider in the chain failed), `conversation_deleted` (deleted
 while the answer was being written) and `internal`. On an error the player's message stays
 stored and no answer is.
+
+`@` mentions go along as `"mentions": [{"kind": "card" | "deck", "id": "..."}]`. A card's
+id is its `id` in the client card index (`data/cards/card-index.json`, the oracle id); a
+deck's id is one of the player's saved decks. The agent sees each mentioned card's full
+text and each mentioned deck as card names only (each Card once, under its section, no
+counts or card text), marked as cards the player explicitly referenced, for this turn only.
+Mentions aren't stored: later turns see the message's text, so the client should keep the
+chip's name in `content`. A card id that doesn't exist, a deck that isn't the player's, or
+more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and nothing is
+stored or run.
 
 ```bash
 curl -N -X POST "http://127.0.0.1:8000/conversations/$CONVERSATION_ID/messages" \

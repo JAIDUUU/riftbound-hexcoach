@@ -6,13 +6,14 @@ oracle name or alias (`find_by_oracle_name`) and suggest from the same alias-awa
 """
 
 import difflib
+import uuid
 from collections.abc import Iterable, Sequence
 from typing import Protocol
 
 from sqlalchemy import Connection
 
 from backend.cards.collapse import Card
-from backend.cards.repository import all_card_names, find_by_oracle_name
+from backend.cards.repository import all_card_names, find_by_oracle_id, find_by_oracle_name
 
 MAX_SUGGESTIONS = 3
 _SIMILARITY_CUTOFF = 0.6
@@ -21,6 +22,10 @@ _SIMILARITY_CUTOFF = 0.6
 class CardCatalog(Protocol):
     def find(self, name: str) -> Card | None:
         """The Card answering to `name` (oracle name or alias, any case), or None."""
+        ...
+
+    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+        """The Card with this oracle id (the `id` the client card index exposes), or None."""
         ...
 
     def all_names(self) -> Sequence[str]:
@@ -36,6 +41,9 @@ class SqlCardCatalog:
 
     def find(self, name: str) -> Card | None:
         return find_by_oracle_name(self.connection, name)
+
+    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+        return find_by_oracle_id(self.connection, oracle_id)
 
     def all_names(self) -> list[str]:
         return all_card_names(self.connection)
