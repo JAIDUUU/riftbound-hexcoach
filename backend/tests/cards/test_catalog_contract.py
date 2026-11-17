@@ -4,6 +4,7 @@ Each test runs against the in-memory fake (always) and the cards table (only wit
 `pytest -m integration`), which keeps the fake behind the decklist tests honest.
 """
 
+import uuid
 from collections.abc import Callable
 from typing import cast
 
@@ -52,6 +53,18 @@ def test_an_oracle_name_beats_another_cards_alias(
     found = catalog.find("Sona, Harmonious")
 
     assert found is not None and found.oracle_name == "Sona, Harmonious"
+
+
+def test_cards_are_found_by_oracle_id(
+    catalog_of: CatalogOf, cards_by_name: dict[str, Card]
+) -> None:
+    catalog = catalog_of(list(cards_by_name.values()))
+    sona = cards_by_name["Sona, Harmonious"]
+
+    found = catalog.find_by_id(uuid.UUID(sona.oracle_id))
+
+    assert found is not None and found.oracle_name == "Sona, Harmonious"
+    assert catalog.find_by_id(uuid.UUID("00000000-0000-4000-8000-000000000000")) is None
 
 
 def test_all_names_carries_oracle_names_and_aliases(
