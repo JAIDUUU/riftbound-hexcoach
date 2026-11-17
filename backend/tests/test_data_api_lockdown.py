@@ -1,4 +1,4 @@
-"""Nothing of ours is reachable through Supabase's Data API (migrations 0007, 0008, 0009).
+"""Nothing of ours is reachable through Supabase's Data API (migrations 0007 and 0008).
 
 Schema-wide on purpose, and it also creates objects to prove that new tables, sequences
 and functions start out closed. These are integration tests (deselected by default), so

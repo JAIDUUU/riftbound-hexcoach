@@ -15,6 +15,8 @@ from sqlalchemy import ColumnElement, Connection, RowMapping, delete, func, inse
 
 from backend.decks.schema import decks_table
 
+MAX_DECK_NAME_CHARS = 100
+
 
 @dataclass(frozen=True, slots=True)
 class Deck:

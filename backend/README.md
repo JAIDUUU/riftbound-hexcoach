@@ -142,6 +142,31 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   goes through; an over-long player message is a 422 on any endpoint. The defaults (4000
   characters, 20 messages) are placeholders until the free-tier limits are verified.
 
+Decks are per account, with the same ownership rules (someone else's deck is a 404):
+
+- `POST /decks/preview` (`decklist`) runs import validation without saving.
+- `POST /decks` (`name`, at most 100 characters, and `decklist`), `GET /decks` (summaries,
+  most recently updated first), `GET /decks/{id}`, `PUT /decks/{id}` (replaces name and
+  text), `DELETE /decks/{id}`. Deleting the Supabase account cascades to its decks.
+- Create, read, update and preview return the validation: every section with its lines,
+  each resolved to a card (`oracle_id`, `oracle_name`) or `null` with close-name
+  suggestions, plus a list of typed warnings (`malformed_line`, `outside_section`,
+  `unknown_section`, `unknown_card`, `section_size`, `copy_limit`). Warnings never block
+  saving.
+
+Decklists are parsed in code (`backend/decks/parse.py`), never by the LLM: one header per
+section (Legend, Champion, MainDeck, Battlefields, Runes, Sideboard) and `<count> <name>`
+lines, where names can contain commas and colons. Only the text is stored. Validation is
+recomputed from it on every read, so a card snapshot refresh is picked up. Cards resolve
+through the same oracle-name/alias matcher and alias-aware suggestions as `lookup_card`
+(`backend/cards/catalog.py`). `import_decklist` (`backend/decks/importing.py`) is the one
+entry point for every decklist, so checks on the decklist itself, such as a size cap, go
+there. The structural numbers (`backend/decks/construction.py`) are **unverified**
+placeholders read from the Core and Tournament Rules for constructed play: 1 Legend,
+1 Champion, a 40-card Main Deck counting the Champion, 3 unique Battlefields, 12 Runes, a
+Sideboard of at most 10, and at most 3 copies of a card across Champion, Main Deck and
+Sideboard.
+
 ### Supabase's Data API is closed
 
 Supabase serves the `public` schema to anyone holding the anon key, which the frontend
@@ -159,8 +184,9 @@ a migration:
 `pytest -m integration` before merging a migration.
 
 Tests never call Supabase: tokens are signed with locally generated keys, and the API
-runs against an in-memory store that `tests/conversations/test_store_contract.py` holds to
-the same ownership rules as the Postgres store.
+runs against in-memory stores that contract suites (`tests/conversations/test_store_contract.py`,
+`tests/decks/test_deck_store_contract.py`, `tests/cards/test_catalog_contract.py`) hold to
+the same rules as their Postgres counterparts.
 
 ### Tracing
 
