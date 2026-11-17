@@ -81,7 +81,7 @@ in [`backend/README.md`](backend/README.md).
 `uv run backend serve` starts the API on `http://127.0.0.1:8000`, with interactive docs at
 `/docs`. Every endpoint requires the signed-in user's Supabase access token as
 `Authorization: Bearer <jwt>`. Users only ever see their own data: someone else's
-conversation returns 404, exactly like a conversation that doesn't exist.
+conversation or deck returns 404, exactly like one that doesn't exist.
 
 ### Conversations
 
@@ -93,6 +93,24 @@ conversation returns 404, exactly like a conversation that doesn't exist.
 | `DELETE /conversations/{id}` | Delete a conversation and its messages. |
 | `PUT /conversations/{id}/messages/{message_id}/feedback` | Give or change your thumbs up or down (`{"rating": "up"}` or `"down"`) on an answer. It is saved with the message and recorded as a Langfuse score on the answer's trace. |
 
+### Decks
+
+A decklist is sectioned plain text: `Legend:`, `Champion:`, `MainDeck:`, `Battlefields:`,
+`Runes:` and `Sideboard:` headers, each followed by lines like `3 Consult the Past`. It is
+parsed in code, never by the LLM. Import validation resolves every line to a card,
+suggests fixes for unknown names, and warns about section sizes and copy limits. Warnings
+never stop a deck from being saved. The deck-construction numbers are unverified
+placeholders until they are checked against the official rules.
+
+| Method and path | What it does |
+| --- | --- |
+| `POST /decks/preview` | Validate a `decklist` without saving it. |
+| `POST /decks` | Save a deck (`name`, up to 100 characters, and `decklist`); returns it with its validation. |
+| `GET /decks` | List your decks (id, name, timestamps), most recently updated first. |
+| `GET /decks/{id}` | One deck with its text and its validation against the current card data. |
+| `PUT /decks/{id}` | Replace a deck's name and text. |
+| `DELETE /decks/{id}` | Delete a deck. |
+
 ### In progress
 
 These endpoints are still being built, so their exact shapes may change:
@@ -102,9 +120,6 @@ These endpoints are still being built, so their exact shapes may change:
   current graph step), `token`, `final` (the full text, citations and validated `[[Card]]`
   tags) and `error`. See [ADR 0005](docs/adr/0005-sse-streaming-and-final-event.md) and
   [#12](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/12).
-- Decks: create, list, read, update and delete your saved decklists, with import validation
-  that flags unknown cards and structural problems
-  ([#16](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/16)).
 - Account deletion, which removes your conversations, messages and decks
   ([#21](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/21)).
 - A health check for deploys and the database keep-alive ping
