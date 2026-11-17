@@ -265,7 +265,8 @@ use `EventSource` for a POST, so the frontend reads the stream with `fetch`.
 
 #### Card tags
 
-The answer prompt has the model write each card as a **Card tag**, `[[Card Name]]`. A tag is
+Both reply prompts (the answer and the abstention) have the model write each card as a **Card
+tag**, `[[Card Name]]`. A tag is
 `[[`, then text with no square brackets, then `]]`; streamed tokens and `final.text` keep the
 markup as written. Once the answer is finished and stored, each tag is checked against the
 cards table with the same matcher as decklists (`cards/tags.py`): it validates only if it

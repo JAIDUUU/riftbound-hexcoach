@@ -231,13 +231,17 @@ def test_the_answer_prompt_states_source_precedence() -> None:
     assert "the newer one (by date) wins" in llm.prompts[-1]
 
 
-def test_the_answer_prompt_asks_for_cards_as_card_tags() -> None:
+def test_the_answer_and_the_abstention_both_ask_for_cards_as_card_tags() -> None:
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
-    llm = ScriptedLLM([PREPARE, STRONG, "answer"])
+    answering = ScriptedLLM([PREPARE, STRONG, "answer"])
+    abstaining = ScriptedLLM([PREPARE, '{"grade": "weak", "rewritten_query": null}', "Which?"])
 
-    run_agent(llm, retriever, "Can I?")
+    answered = run_agent(answering, retriever, "Can I?")
+    abstained = run_agent(abstaining, retriever, "Can I?")
 
-    assert "[[Card Name]]" in llm.prompts[-1]
+    assert (answered["outcome"], abstained["outcome"]) == ("answered", "abstained")
+    assert "[[Card Name]]" in answering.prompts[-1]
+    assert "[[Card Name]]" in abstaining.prompts[-1]
 
 
 def test_evidence_is_formatted_by_precedence_and_cited_by_name() -> None:
