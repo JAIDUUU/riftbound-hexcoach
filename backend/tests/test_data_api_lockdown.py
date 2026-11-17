@@ -1,4 +1,4 @@
-"""Nothing of ours is reachable through Supabase's Data API (migrations 0007 and 0008).
+"""Nothing of ours is reachable through Supabase's Data API (migrations 0007, 0008, 0009).
 
 Schema-wide on purpose, and it also creates objects to prove that new tables, sequences
 and functions start out closed. These are integration tests (deselected by default), so
@@ -30,7 +30,7 @@ _CLIENT_SEQUENCE_GRANTS = text(
 def test_every_public_table_has_row_level_security(db_connection: Connection) -> None:
     tables = dict(db_connection.execute(_PUBLIC_TABLES).tuples().all())
 
-    assert {"cards", "chunks", "conversations", "messages"} <= tables.keys()
+    assert {"cards", "chunks", "conversations", "messages", "decks"} <= tables.keys()
     assert [name for name, protected in tables.items() if not protected] == []
 
 
