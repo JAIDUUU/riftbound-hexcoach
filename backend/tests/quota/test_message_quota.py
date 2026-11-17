@@ -1,5 +1,7 @@
 import uuid
-from datetime import UTC, datetime, timedelta, timezone
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
@@ -12,8 +14,9 @@ from backend.quota.admission import (
     QuotaSettings,
     quota_settings_from_env,
 )
+from backend.quota.store import UsageStore
 from tests.quota.fake_clock import FakeClock
-from tests.quota.memory_usage import memory_quota
+from tests.quota.memory_usage import InMemoryUsageStore, memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -176,3 +179,39 @@ def test_a_message_the_daily_quota_refuses_takes_no_minute_slot() -> None:
     quota.refund(first)
 
     quota.reserve(ALICE)  # the refused attempt left the minute free
+
+
+class _FlakyUsage(InMemoryUsageStore):
+    """Its first release fails, as a dropped database connection would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_left = 1
+
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        if self.failures_left:
+            self.failures_left -= 1
+            raise ConnectionError("usage table unreachable")
+        super().release(user_id, day)
+
+
+def test_a_refund_that_fails_can_be_retried_and_is_logged_with_what_to_fix(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage = _FlakyUsage()
+
+    @contextmanager
+    def open_usage() -> Generator[UsageStore]:
+        yield usage
+
+    quota = MessageQuota(QuotaSettings(messages_per_day=1), open_usage, FakeClock(EVENING))
+    reservation = quota.reserve(ALICE)
+
+    with pytest.raises(ConnectionError):
+        quota.refund(reservation)
+
+    assert str(ALICE) in caplog.text and "2026-11-17" in caplog.text
+    assert not reservation.refunded
+    quota.refund(reservation)
+    assert reservation.refunded
+    quota.reserve(ALICE)  # the day's one slot is free again
