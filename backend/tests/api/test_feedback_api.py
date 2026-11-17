@@ -167,3 +167,23 @@ def test_a_message_from_another_conversation_or_a_made_up_one_is_not_found(
     assert _vote(client, other_conversation, answer.message_id, "up").status_code == 404
     assert _vote(client, other_conversation, uuid.uuid4(), "up").status_code == 404
     assert langfuse.scores == []
+
+
+def test_only_answers_with_a_trace_can_receive_feedback(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    untraced = _answered(store, trace_id=None)
+    detail = store.get(ALICE, untraced.conversation_id)
+    assert detail is not None
+    question = detail.messages[0]
+
+    on_question = _vote(client, untraced.conversation_id, question.id, "up")
+    on_untraced_answer = _vote(client, untraced.conversation_id, untraced.message_id, "up")
+
+    assert on_question.status_code == 409
+    assert on_untraced_answer.status_code == 409
+    assert on_untraced_answer.json() == {
+        "detail": "Only answers with a trace can receive feedback."
+    }
+    assert langfuse.scores == []
+    assert _feedback_shown(client, untraced.conversation_id) == [None, None]

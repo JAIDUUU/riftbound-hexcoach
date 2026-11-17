@@ -36,6 +36,7 @@ from backend.conversations.store import (
     Message,
     Rating,
     SqlConversationStore,
+    UnscorableMessageError,
 )
 
 OpenStore = Callable[[], AbstractContextManager[ConversationStore]]
@@ -190,7 +191,10 @@ def give_feedback(
     store: Store,
     scores: Scores,
 ) -> MessageOut:
-    message = store.give_feedback(user.id, conversation_id, message_id, body.rating)
+    try:
+        message = store.give_feedback(user.id, conversation_id, message_id, body.rating)
+    except UnscorableMessageError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
     if message is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
     if scores is not None and message.trace_id is not None and message.feedback is not None:

@@ -40,6 +40,13 @@ class Conversation:
 Rating = Literal["up", "down"]
 
 
+class UnscorableMessageError(ValueError):
+    """Feedback is scored on an answer's trace, so only traced answers can receive it."""
+
+    def __init__(self) -> None:
+        super().__init__("Only answers with a trace can receive feedback.")
+
+
 @dataclass(frozen=True, slots=True)
 class Feedback:
     """The player's thumbs up/down on an answer."""
@@ -100,8 +107,9 @@ class ConversationStore(Protocol):
         message_id: uuid.UUID,
         rating: Rating,
     ) -> Message | None:
-        """Set (or change) the player's rating on a message; None if the message is not in
-        one of the user's conversations."""
+        """Set (or change) the player's rating on an answer; None if the message is not in
+        one of the user's conversations. Raises UnscorableMessageError unless the message is
+        an assistant message with a trace id."""
         ...
 
 
@@ -235,12 +243,15 @@ class SqlConversationStore:
         message_id: uuid.UUID,
         rating: Rating,
     ) -> Message | None:
+        target = (
+            (messages_table.c.id == message_id)
+            & (messages_table.c.conversation_id == conversation_id)
+            & exists().where(_owned(user_id, conversation_id))
+        )
         statement = (
             update(messages_table)
             .where(
-                (messages_table.c.id == message_id)
-                & (messages_table.c.conversation_id == conversation_id)
-                & exists().where(_owned(user_id, conversation_id))
+                target, messages_table.c.role == "assistant", messages_table.c.trace_id.is_not(None)
             )
             .values(
                 feedback=rating,
@@ -251,4 +262,8 @@ class SqlConversationStore:
             .returning(*_MESSAGE_COLUMNS)
         )
         row = self.connection.execute(statement).mappings().first()
-        return None if row is None else _message(row)
+        if row is not None:
+            return _message(row)
+        if self.connection.execute(select(messages_table.c.id).where(target)).first() is not None:
+            raise UnscorableMessageError
+        return None

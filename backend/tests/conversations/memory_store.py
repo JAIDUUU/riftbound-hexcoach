@@ -16,6 +16,7 @@ from backend.conversations.store import (
     Feedback,
     Message,
     Rating,
+    UnscorableMessageError,
 )
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -104,6 +105,8 @@ class InMemoryConversationStore:
             return None
         for index, message in enumerate(row.messages):
             if message.id == message_id:
+                if message.role != "assistant" or message.trace_id is None:
+                    raise UnscorableMessageError
                 given_at = self._now() if message.feedback is None else message.feedback.given_at
                 rated = replace(message, feedback=Feedback(rating=rating, given_at=given_at))
                 row.messages[index] = rated
