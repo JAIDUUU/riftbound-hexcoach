@@ -16,6 +16,7 @@ from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
 from backend.retrieval.repository import SearchHit
+from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import FakeCoach
 from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
@@ -75,7 +76,15 @@ def _client(store: InMemoryConversationStore, coach: FakeCoach) -> TestClient:
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return TestClient(create_app(fake_verifier(), open_store, open_decks=no_decks, coach=coach))
+    return TestClient(
+        create_app(
+            fake_verifier(),
+            open_store,
+            open_decks=no_decks,
+            coach=coach,
+            delete_account=unused_account_deletion,
+        )
+    )
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
