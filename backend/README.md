@@ -33,7 +33,8 @@ uv run backend card <name>     # look a card up by oracle name or alias and prin
 uv run backend ingest-rules    # chunk + embed the newest Core Rules PDF in data/rules into the DB
 uv run backend ingest-faqs     # chunk + embed the FAQ files in data/FAQs into the database
 uv run backend search <query>  # hybrid keyword+vector search across the chunks (-k for more hits)
-uv run backend ask <prompt>    # smoke-test the LLM provider fallback chain with one prompt
+uv run backend ask <question>  # answer a rules question judge-style, with citations (any language)
+uv run backend ping <prompt>   # smoke-test the LLM provider fallback chain with one raw prompt
 uv run backend check-golden    # validate data/golden/golden-set.yaml
 uv run backend eval-retrieval --run-name <name>  # score retrieval on the golden set via Langfuse
 ```
@@ -71,6 +72,20 @@ consumers apply source precedence (ADR 0001: FAQ > card text > rules) via
 `backend.retrieval.precedence.order_by_precedence`, which keeps relevance order within
 each class; "between two FAQs the newer wins" is a conflict rule the answerer applies
 using the dates on the hits. `search` itself ranks purely by relevance.
+
+### The agent behind `ask`
+
+`ask` runs a corrective-RAG-lite LangGraph: an LLM first rewrites the question as one
+compact English search query (card nicknames expanded, backstory stripped, non-English
+questions translated) and detects the player's language; hybrid retrieval runs; an LLM
+grades whether the evidence actually covers the question. Strong evidence gets a
+judge-style answer citing rule numbers and FAQ titles, in the player's language with
+card names and rule quotes kept in English. Weak evidence gets exactly one corrective
+retry with the grader's rewritten query; if the evidence is still weak the agent asks a
+clarifying question or honestly declines instead of guessing. Prompts live in
+`backend/agent/prompts.py` (and only there); the answer prompt states the source
+precedence. The graph takes message history as input, so the API can later run it fresh
+per request.
 
 ### Embeddings and hybrid search
 

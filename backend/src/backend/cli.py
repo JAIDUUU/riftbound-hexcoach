@@ -266,7 +266,7 @@ def _eval_retrieval(args: argparse.Namespace) -> int:
     return 0
 
 
-def _ask(args: argparse.Namespace) -> int:
+def _ping(args: argparse.Namespace) -> int:
     from backend.llm.providers import chat_chain
 
     chain = chat_chain()
@@ -274,6 +274,35 @@ def _ask(args: argparse.Namespace) -> int:
         print(f"note: {provider} has no API key and was skipped")
     provider, message = chain.ask(" ".join(args.prompt))
     print(f"[{provider}] {message.text}")
+    return 0
+
+
+def _ask(args: argparse.Namespace) -> int:
+    from backend.agent.graph import run_agent
+    from backend.db import make_engine
+    from backend.llm.providers import chat_chain
+    from backend.retrieval.embedding import embedder
+    from backend.retrieval.repository import SearchHit, hybrid_search_chunks
+
+    chain = chat_chain()
+    for provider in chain.skipped:
+        print(f"note: {provider} has no API key and was skipped")
+
+    engine = make_engine()
+    with engine.connect() as connection:
+
+        def retrieve(query: str) -> list[SearchHit]:
+            return hybrid_search_chunks(
+                connection, query, embedder().embed_query(query), limit=args.limit
+            )
+
+        state = run_agent(chain, retrieve, " ".join(args.question))
+    engine.dispose()
+
+    print(state["answer"])
+    print()
+    label = "answered" if state["outcome"] == "answered" else "abstained"
+    print(f"[{label} \u00b7 query: {state['query']!r} \u00b7 {len(state['hits'])} chunks]")
     return 0
 
 
@@ -324,8 +353,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the embedding model and use full-text search alone",
     )
-    asker = add("ask", _ask, "Send one prompt through the real provider chain (smoke test).")
-    asker.add_argument("prompt", nargs="+", help="The prompt to send")
+    pinger = add("ping", _ping, "Send one raw prompt through the provider chain (smoke test).")
+    pinger.add_argument("prompt", nargs="+", help="The prompt to send")
+    asker = add("ask", _ask, "Answer a rules question judge-style, with citations.")
+    asker.add_argument("question", nargs="+", help="The rules question, any language")
+    asker.add_argument("-k", "--limit", type=int, default=8, help="Chunks per retrieval")
     add("check-golden", _check_golden, "Validate the golden set file.")
     evaluator = add(
         "eval-retrieval", _eval_retrieval, "Run the golden set against retrieval via Langfuse."

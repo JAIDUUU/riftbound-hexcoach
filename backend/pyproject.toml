@@ -15,6 +15,7 @@ dependencies = [
     "langchain-groq>=1.2.0",
     "langchain-openai>=1.8.0",
     "langfuse>=5.2.0",
+    "langgraph>=1.2.20",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.2",
     "python-dotenv>=1.0",
