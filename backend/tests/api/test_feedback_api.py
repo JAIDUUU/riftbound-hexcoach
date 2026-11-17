@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from backend.api.app import OpenStore, create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
+from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
@@ -76,6 +77,7 @@ def client(store: InMemoryConversationStore, langfuse: FakeLangfuse) -> TestClie
             _opener(store),
             open_decks=no_decks,
             coach=unused_coach,
+            delete_account=unused_account_deletion,
             scores=langfuse,
         )
     )
@@ -153,7 +155,12 @@ def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
 def test_without_langfuse_the_vote_is_still_stored(store: InMemoryConversationStore) -> None:
     client = TestClient(
         create_app(
-            fake_verifier(), _opener(store), open_decks=no_decks, coach=unused_coach, scores=None
+            fake_verifier(),
+            _opener(store),
+            open_decks=no_decks,
+            coach=unused_coach,
+            delete_account=unused_account_deletion,
+            scores=None,
         )
     )
     answer = _answered(store)
@@ -178,6 +185,7 @@ def test_a_vote_that_fails_to_commit_is_never_scored(
             failing_commit,
             open_decks=no_decks,
             coach=unused_coach,
+            delete_account=unused_account_deletion,
             scores=langfuse,
         ),
         raise_server_exceptions=False,

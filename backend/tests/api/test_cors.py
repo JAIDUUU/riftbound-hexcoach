@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api.app import create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
+from tests.api.accounts import unused_account_deletion
 from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier
 from tests.conversations.memory_store import InMemoryConversationStore
@@ -38,6 +39,7 @@ def test_a_configured_frontend_may_call_the_api_with_its_bearer_token() -> None:
             _open_store,
             open_decks=no_decks,
             coach=unused_coach,
+            delete_account=unused_account_deletion,
             cors_origins=(FRONTEND,),
         )
     )
@@ -56,6 +58,7 @@ def test_other_origins_get_no_cors_permission() -> None:
             _open_store,
             open_decks=no_decks,
             coach=unused_coach,
+            delete_account=unused_account_deletion,
             cors_origins=(FRONTEND,),
         )
     )
