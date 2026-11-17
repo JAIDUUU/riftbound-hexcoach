@@ -1,18 +1,21 @@
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import date
 from typing import Any
 
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolCall
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.tools.base import ArgsSchema
 from pydantic import BaseModel, Field
 
-from backend.agent.graph import Turn, format_evidence, run_agent
+from backend.agent.graph import AgentEvent, Step, Token, Turn, format_evidence, run_agent
 from backend.agent.tools import make_lookup_card
+from backend.llm.providers import AllProvidersFailedError, ProviderChain
 from backend.retrieval.repository import SearchHit
 
 
@@ -375,6 +378,60 @@ def test_the_node_config_is_handed_to_tool_invoke_explicitly() -> None:
     handed = tool.configs[0]
     assert handed is not None
     assert handed.get("callbacks") is not None
+
+
+def _streaming_chain(replies: Sequence[str]) -> ProviderChain:
+    """A provider chain over a real (fake) chat model that streams word by word, which
+    is what the token events are built from; ScriptedLLM above never streams."""
+    return ProviderChain([("fake", GenericFakeChatModel(messages=iter(replies)))])
+
+
+def test_a_streamed_run_reports_each_step_as_it_starts_and_streams_only_the_answer() -> None:
+    retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
+    llm = _streaming_chain([PREPARE, STRONG, "No - only once per turn (rule 472)."])
+    events: list[AgentEvent] = []
+
+    state = run_agent(llm, retriever, "Can I score twice?", on_event=events.append)
+
+    steps = [event.name for event in events if isinstance(event, Step)]
+    tokens = [event.text for event in events if isinstance(event, Token)]
+    assert steps == ["prepare", "retrieve", "grade", "answer"]
+    assert "".join(tokens) == "No - only once per turn (rule 472)."
+    assert len(tokens) > 1  # streamed, not delivered in one piece
+    assert events.index(Step("answer")) < events.index(Token(tokens[0]))
+    assert state["answer"] == "No - only once per turn (rule 472)."
+    assert state["outcome"] == "answered"
+
+
+def test_a_streamed_abstention_streams_the_clarifying_question() -> None:
+    weak_no_rewrite = '{"grade": "weak", "rewritten_query": null}'
+    llm = _streaming_chain([PREPARE, weak_no_rewrite, "Which Diana do you mean?"])
+    events: list[AgentEvent] = []
+
+    state = run_agent(llm, RecordingRetriever({}), "Diana?", on_event=events.append)
+
+    assert [e.name for e in events if isinstance(e, Step)] == [
+        "prepare",
+        "retrieve",
+        "grade",
+        "abstain",
+    ]
+    assert "".join(e.text for e in events if isinstance(e, Token)) == "Which Diana do you mean?"
+    assert state["outcome"] == "abstained"
+
+
+def test_provider_exhaustion_surfaces_from_a_streamed_run_as_is() -> None:
+    class Down(GenericFakeChatModel):
+        def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
+            raise ConnectionError("quota exceeded")
+
+        def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
+            raise ConnectionError("quota exceeded")
+
+    chain = ProviderChain([("a", Down(messages=iter([]))), ("b", Down(messages=iter([])))])
+
+    with pytest.raises(AllProvidersFailedError):
+        run_agent(chain, RecordingRetriever({}), "Can I?", on_event=lambda event: None)
 
 
 def test_with_tools_the_grader_is_told_card_text_is_fixable() -> None:

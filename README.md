@@ -97,6 +97,7 @@ read [`docs/deployment.md`](docs/deployment.md).
 | `GET /conversations` | List your conversations, most recently active first. |
 | `GET /conversations/{id}` | One conversation with its messages, oldest first, each with its trace id and your feedback. |
 | `DELETE /conversations/{id}` | Delete a conversation and its messages. |
+| `POST /conversations/{id}/messages` | Send a message (`{"content": "..."}`) and stream the answer back as server-sent events: `start` (the answer's message id and trace id), `status` (each graph step), `token`, then `final` (the full text, outcome and citations) or `error`. Events and a curl example are in [`backend/README.md`](backend/README.md#sending-a-message-sse); see also [ADR 0005](docs/adr/0005-sse-streaming-and-final-event.md). |
 | `PUT /conversations/{id}/messages/{message_id}/feedback` | Give or change your thumbs up or down (`{"rating": "up"}` or `"down"`) on an answer. It is saved with the message and recorded as a Langfuse score on the answer's trace. |
 
 ### Decks
@@ -119,13 +120,8 @@ placeholders until they are checked against the official rules.
 
 ### In progress
 
-These endpoints are still being built, so their exact shapes may change:
+Still being built, so the exact shape may change:
 
-- `POST /conversations/{id}/messages` sends a message and streams the answer back as
-  server-sent events. The events are `start` (the message id and trace id), `status` (the
-  current graph step), `token`, `final` (the full text, citations and validated `[[Card]]`
-  tags) and `error`. See [ADR 0005](docs/adr/0005-sse-streaming-and-final-event.md) and
-  [#12](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/12).
 - Account deletion, which removes your conversations, messages and decks
   ([#21](https://github.com/leofarias-cpu/riftbound-hexcoach/issues/21)).
 

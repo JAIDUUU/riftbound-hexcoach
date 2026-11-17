@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from langchain_core.tools import BaseTool
-    from sqlalchemy import Connection
-
     from backend.retrieval.repository import SearchHit
 
 from backend.cards.client_index import build_client_index
@@ -293,20 +290,8 @@ def _ping(args: argparse.Namespace) -> int:
     return 0
 
 
-def _card_lookup_tool(connection: "Connection") -> "BaseTool":
-    """The lookup_card tool backed by the cards table (issue #10)."""
-    from backend.agent.tools import make_lookup_card
-    from backend.cards.chunk_text import card_text_chunk
-    from backend.cards.repository import all_card_names, find_by_oracle_name
-
-    def find_card(name: str) -> str | None:
-        card = find_by_oracle_name(connection, name)
-        return card_text_chunk(card) if card else None
-
-    return make_lookup_card(find_card, lambda: all_card_names(connection))
-
-
 def _ask(args: argparse.Namespace) -> int:
+    from backend.agent.coach import card_lookup_tool
     from backend.agent.tracing import traced_run, tracing_enabled
     from backend.db import make_engine
     from backend.llm.providers import chat_chain
@@ -328,7 +313,7 @@ def _ask(args: argparse.Namespace) -> int:
             )
 
         state, trace_id = traced_run(
-            chain, retrieve, " ".join(args.question), tools=[_card_lookup_tool(connection)]
+            chain, retrieve, " ".join(args.question), tools=[card_lookup_tool(connection)]
         )
     engine.dispose()
 
@@ -341,6 +326,7 @@ def _ask(args: argparse.Namespace) -> int:
 
 
 def _eval_agent(args: argparse.Namespace) -> int:
+    from backend.agent.coach import card_lookup_tool
     from backend.agent.graph import Outcome
     from backend.agent.tracing import run_in_open_trace
     from backend.db import make_engine
@@ -367,7 +353,7 @@ def _eval_agent(args: argparse.Namespace) -> int:
                 connection, query, embedder().embed_query(query), limit=args.limit
             )
 
-        lookup = _card_lookup_tool(connection)
+        lookup = card_lookup_tool(connection)
 
         def ask(question: str) -> tuple[str, Outcome]:
             # run_experiment already opens a trace per item; adding traced_run's own
@@ -443,7 +429,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the embedding model and use full-text search alone",
     )
-    server = add("serve", _serve, "Run the HTTP API (Supabase-authenticated conversations).")
+    server = add("serve", _serve, "Run the HTTP API (conversations and streamed chat).")
     server.add_argument("--host", default="127.0.0.1", help="Interface to bind")
     server.add_argument("--port", type=int, default=8000, help="Port to listen on")
     server.add_argument("--reload", action="store_true", help="Restart on code changes (dev)")

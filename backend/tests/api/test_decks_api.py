@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from backend.api.app import DeckAccess, create_app
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
+from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier, mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
@@ -40,7 +41,9 @@ def client(decks: InMemoryDeckStore, cards_by_name: dict[str, Card]) -> TestClie
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, cards)
 
-    return TestClient(create_app(fake_verifier(), open_store, open_decks))
+    return TestClient(
+        create_app(fake_verifier(), open_store, open_decks=open_decks, coach=unused_coach)
+    )
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -163,7 +166,9 @@ def test_reading_a_deck_validates_it_against_the_current_cards(
     def no_conversations() -> Generator[InMemoryConversationStore]:
         yield InMemoryConversationStore(Limits())
 
-    client = TestClient(create_app(fake_verifier(), no_conversations, open_decks))
+    client = TestClient(
+        create_app(fake_verifier(), no_conversations, open_decks=open_decks, coach=unused_coach)
+    )
     saved = client.post(
         "/decks",
         json={"name": "Early", "decklist": "Legend:\n1 Annie, Dark Child"},

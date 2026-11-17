@@ -16,7 +16,15 @@ from typing import Literal, Protocol
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
-from backend.agent.graph import AgentState, ChatModel, Retriever, Turn, run_agent
+from backend.agent.graph import (
+    AgentState,
+    ChatModel,
+    OnEvent,
+    Retriever,
+    Started,
+    Turn,
+    run_agent,
+)
 from backend.config import optional_env
 from backend.conversations.store import Feedback
 
@@ -60,10 +68,17 @@ def traced_run(
     user_id: str | None = None,
     conversation_id: str | None = None,
     tools: Sequence[BaseTool] = (),
+    on_event: OnEvent | None = None,
 ) -> tuple[AgentState, str | None]:
-    """Run the agent; return its final state and the Langfuse trace id (None untraced)."""
+    """Run the agent; return its final state and the Langfuse trace id (None untraced).
+
+    With `on_event` the run is streamed (see run_agent), and the first event is `Started`
+    with the trace id, so a client can wire feedback before the answer exists.
+    """
     if not tracing_enabled():
-        return run_agent(llm, retrieve, question, history, tools=tools), None
+        if on_event is not None:
+            on_event(Started(trace_id=None))
+        return run_agent(llm, retrieve, question, history, tools=tools, on_event=on_event), None
 
     from langfuse import get_client, propagate_attributes
 
@@ -80,8 +95,16 @@ def traced_run(
         ) as span,
     ):
         trace_id = langfuse.get_current_trace_id()
+        if on_event is not None:
+            on_event(Started(trace_id=trace_id))
         state = run_agent(
-            llm, retrieve, question, history, config=_langfuse_callbacks(), tools=tools
+            llm,
+            retrieve,
+            question,
+            history,
+            config=_langfuse_callbacks(),
+            tools=tools,
+            on_event=on_event,
         )
         span.update(output={"outcome": state["outcome"], "answer": state["answer"]})
     langfuse.flush()

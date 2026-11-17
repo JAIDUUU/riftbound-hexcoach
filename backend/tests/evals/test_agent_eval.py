@@ -3,7 +3,6 @@ import pytest
 from backend.evals.agent_eval import (
     aggregate_behaviour_accuracy,
     aggregate_citation_score,
-    cited_rules,
     evaluate_agent_item,
 )
 from backend.evals.golden import Behaviour, GoldenItem
@@ -19,21 +18,6 @@ def _item(behaviour: Behaviour, expected_rules: tuple[str, ...]) -> GoldenItem:
         lang="en",
         notes=None,
     )
-
-
-def test_cited_rules_finds_dotted_ids_and_strips_sentence_dots() -> None:
-    answer = (
-        "No - rule 472 says once per turn. Per 466.2.a. and rule 467.2.c.3, "
-        "the trigger resolves first."
-    )
-
-    assert cited_rules(answer) == {"472", "466.2.a", "467.2.c.3"}
-
-
-def test_years_dates_and_short_numbers_are_not_citations() -> None:
-    answer = "As of the 2026-10-09 rules, with 4 might and 12 damage, see rule 472."
-
-    assert cited_rules(answer) == {"472"}
 
 
 def test_a_correct_answer_scores_full_citations() -> None:

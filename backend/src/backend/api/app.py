@@ -1,10 +1,12 @@
-"""The HTTP API (issue #11): Supabase-authenticated conversations, feedback (#19) and decks (#16).
+"""The HTTP API (issues #11, #12, #16, #19): Supabase-authenticated conversations, streamed
+chat, feedback and decks.
 
 `create_app` takes its collaborators (the token verifier, a way to open the conversation
-store and the decks for one request, the Langfuse client feedback is scored with, and a
-database ping for `/health`), so tests build the app with fake keys, in-memory stores and
-a fake Langfuse; `production_app` wires Supabase's JWKS, Postgres, Langfuse and the CORS
-origins from the environment. Serve it with `uv run backend serve`.
+store and the decks for one request, the coach that answers messages, the Langfuse client
+feedback is scored with, and a database ping for `/health`), so tests build the app with
+fake keys, in-memory stores, a scripted coach and a fake Langfuse; `production_app` wires
+Supabase's JWKS, Postgres, the real agent, Langfuse and the CORS origins from the
+environment. Serve it with `uv run backend serve`.
 
 `/health` is public on purpose (issue #22): the scheduled keep-alive hits it so the free
 Supabase project sees a query and doesn't pause. It says only "ok" or 503.
@@ -12,7 +14,7 @@ Supabase project sees a query and doesn't pause. It says only "ok" or 503.
 
 import logging
 import uuid
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,8 +33,10 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
+from backend.agent.coach import Coach, Question
 from backend.agent.graph import Role
 from backend.agent.tracing import ScoreClient, langfuse_scores, score_feedback
 from backend.api.auth import (
@@ -42,6 +46,7 @@ from backend.api.auth import (
     TokenVerifier,
     supabase_verifier,
 )
+from backend.api.turn import OpenStore, PreparedTurn, stream_turn
 from backend.cards.catalog import CardCatalog, SqlCardCatalog
 from backend.config import cors_allowed_origins, supabase_url
 from backend.conversations.limits import MAX_TITLE_CHARS, MessageTooLongError, limits_from_env
@@ -60,9 +65,6 @@ from backend.decks.store import MAX_DECK_NAME_CHARS, Deck, DeckStore, SqlDeckSto
 from backend.decks.warnings import WarningKind
 
 _log = logging.getLogger(__name__)
-
-OpenStore = Callable[[], AbstractContextManager[ConversationStore]]
-"""Opens a store for one request; leaving the context commits (or rolls back on error)."""
 
 PingDatabase = Callable[[], None]
 """Runs one trivial query against the database; raises if it can't be reached."""
@@ -85,6 +87,7 @@ class _Collaborators:
     verifier: TokenVerifier
     open_store: OpenStore
     open_decks: OpenDecks
+    coach: Coach
     scores: ScoreClient | None
     ping_database: PingDatabase | None
 
@@ -219,6 +222,41 @@ def delete_conversation(conversation_id: uuid.UUID, user: User, store: Store) ->
     if not store.delete(user.id, conversation_id):
         raise _not_found()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class MessageIn(BaseModel):
+    """A player message. The length cap is configuration, enforced by the store."""
+
+    content: str = Field(min_length=1)
+
+
+def begin_turn(
+    conversation_id: uuid.UUID, body: MessageIn, user: User, request: Request
+) -> PreparedTurn:
+    """Every check that can refuse a message, run before the event stream opens so a
+    refusal is a plain HTTP error rather than an `error` event inside a 200: the
+    conversation must be the user's (404) and the message must fit the cap (422). The
+    player's message is committed here; the answer is stored when it is ready."""
+    with _collaborators(request).open_store() as store:
+        history = store.history(user.id, conversation_id)
+        if history is None:
+            raise _not_found()
+        store.add_message(user.id, conversation_id, "user", body.content)
+    question = Question(
+        text=body.content,
+        history=tuple(history),
+        user_id=user.id,
+        conversation_id=conversation_id,
+    )
+    return PreparedTurn(question=question, answer_id=uuid.uuid4())
+
+
+@router.post("/{conversation_id}/messages", response_class=EventSourceResponse)
+def post_message(
+    turn: Annotated[PreparedTurn, Depends(begin_turn)], request: Request
+) -> Iterator[ServerSentEvent]:
+    collaborators = _collaborators(request)
+    yield from stream_turn(turn, collaborators.coach, collaborators.open_store)
 
 
 @router.put("/{conversation_id}/messages/{message_id}/feedback")
@@ -422,8 +460,9 @@ def _message_too_long(request: Request, error: Exception) -> JSONResponse:
 def create_app(
     verifier: TokenVerifier,
     open_store: OpenStore,
-    open_decks: OpenDecks,
     *,
+    open_decks: OpenDecks,
+    coach: Coach,
     scores: ScoreClient | None = None,
     ping_database: PingDatabase | None = None,
     cors_origins: Sequence[str] = (),
@@ -441,7 +480,7 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     app.state.collaborators = _Collaborators(
-        verifier, open_store, open_decks, scores, ping_database
+        verifier, open_store, open_decks, coach, scores, ping_database
     )
     # App-wide: the cap is enforced in the store, so any endpoint that writes a player
     # message gets a clear 422 rather than a 500.
@@ -453,8 +492,11 @@ def create_app(
 
 
 def production_app() -> FastAPI:
-    """The API wired to Supabase Auth and Postgres (an ASGI factory for uvicorn)."""
+    """The API wired to Supabase Auth, Postgres and the provider chain (an ASGI factory
+    for uvicorn)."""
+    from backend.agent.coach import database_coach
     from backend.db import make_engine, ping_database
+    from backend.llm.providers import chat_chain
 
     engine = make_engine()
     limits = limits_from_env()
@@ -472,7 +514,8 @@ def production_app() -> FastAPI:
     return create_app(
         supabase_verifier(supabase_url()),
         open_store,
-        open_decks,
+        open_decks=open_decks,
+        coach=database_coach(engine, chat_chain()),
         scores=langfuse_scores(),
         ping_database=lambda: ping_database(engine),
         cors_origins=cors_allowed_origins(),

@@ -11,6 +11,7 @@ from backend.api.app import Store, User, create_app
 from backend.api.auth import TokenVerifier
 from backend.conversations.limits import MAX_TITLE_CHARS, Limits
 from backend.conversations.store import ConversationStore
+from tests.api.coaches import unused_coach
 from tests.api.tokens import ISSUER, fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import no_decks
@@ -29,7 +30,7 @@ def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
     def open_store() -> Generator[ConversationStore]:
         yield store
 
-    return create_app(verifier, open_store, no_decks)
+    return create_app(verifier, open_store, open_decks=no_decks, coach=unused_coach)
 
 
 def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:

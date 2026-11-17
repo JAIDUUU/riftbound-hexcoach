@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from backend.api.app import OpenStore, create_app
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
+from tests.api.coaches import unused_coach
 from tests.api.tokens import fake_verifier, mint
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import no_decks
@@ -69,7 +70,15 @@ def _opener(store: InMemoryConversationStore) -> OpenStore:
 
 @pytest.fixture
 def client(store: InMemoryConversationStore, langfuse: FakeLangfuse) -> TestClient:
-    return TestClient(create_app(fake_verifier(), _opener(store), no_decks, scores=langfuse))
+    return TestClient(
+        create_app(
+            fake_verifier(),
+            _opener(store),
+            open_decks=no_decks,
+            coach=unused_coach,
+            scores=langfuse,
+        )
+    )
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -142,7 +151,11 @@ def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
 
 
 def test_without_langfuse_the_vote_is_still_stored(store: InMemoryConversationStore) -> None:
-    client = TestClient(create_app(fake_verifier(), _opener(store), no_decks, scores=None))
+    client = TestClient(
+        create_app(
+            fake_verifier(), _opener(store), open_decks=no_decks, coach=unused_coach, scores=None
+        )
+    )
     answer = _answered(store)
 
     response = _vote(client, answer.conversation_id, answer.message_id, "down")
@@ -160,7 +173,13 @@ def test_a_vote_that_fails_to_commit_is_never_scored(
         raise RuntimeError("commit failed")
 
     client = TestClient(
-        create_app(fake_verifier(), failing_commit, no_decks, scores=langfuse),
+        create_app(
+            fake_verifier(),
+            failing_commit,
+            open_decks=no_decks,
+            coach=unused_coach,
+            scores=langfuse,
+        ),
         raise_server_exceptions=False,
     )
     answer = _answered(store)

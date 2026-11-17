@@ -4,17 +4,12 @@ Pure logic (regex + set arithmetic), unit-tested without network, database or La
 The Langfuse experiment wiring that feeds it real agent runs lives in langfuse_run.py.
 """
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from backend.agent.citations import cited_rules
 from backend.agent.graph import Outcome
 from backend.evals.golden import Behaviour, GoldenItem
-
-# A rule id as answers cite them: three digits, then dotted alphanumeric segments. The
-# lookarounds keep years like 2026 from matching their inner digits, while a sentence
-# dot right after a citation ("per 466.2.a.") stays out of the match.
-_RULE_CITATION = re.compile(r"(?<![\d.])(\d{3}(?:\.[0-9a-z]+)*)(?!\d)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,11 +22,6 @@ class AgentItemResult:
     cited: tuple[str, ...]
     missing: tuple[str, ...]
     citation_score: float | None  # None for abstain items: there is nothing to cite
-
-
-def cited_rules(answer: str) -> set[str]:
-    """Every rule id the answer text cites (trailing sentence dots stripped)."""
-    return {match.rstrip(".") for match in _RULE_CITATION.findall(answer)}
 
 
 def evaluate_agent_item(item: GoldenItem, answer: str, outcome: Outcome) -> AgentItemResult:

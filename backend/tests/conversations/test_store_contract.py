@@ -91,6 +91,23 @@ def test_nobody_can_write_into_someone_elses_conversation(harness: Harness) -> N
     assert detail.messages == ()
 
 
+def test_a_message_can_be_stored_under_an_id_chosen_up_front(harness: Harness) -> None:
+    # The message endpoint announces the answer's id before the answer exists.
+    alice = harness.new_user()
+    conversation = harness.store.create(alice, None)
+    chosen = uuid.uuid4()
+
+    saved = harness.store.add_message(
+        alice, conversation.id, "assistant", "No.", "trace-1", message_id=chosen
+    )
+
+    assert saved is not None
+    assert saved.id == chosen
+    detail = harness.store.get(alice, conversation.id)
+    assert detail is not None
+    assert [m.id for m in detail.messages] == [chosen]
+
+
 def test_player_messages_over_the_cap_are_refused_but_answers_are_not(harness: Harness) -> None:
     alice = harness.new_user()
     conversation = harness.store.create(alice, None)
