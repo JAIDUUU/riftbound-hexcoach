@@ -353,11 +353,21 @@ What counts: only a message whose turn ends in `final`. On
 `POST /conversations/{id}/messages` the limits are checked last, after the token (401), the
 conversation (404), the length cap and the mentions (422), so a refused message never takes a
 slot. The slot it takes is refunded, in both limits, if the turn ends in an `error` event
-(`providers_unavailable`, `internal`, `conversation_deleted`) or the message can't be stored.
+(`providers_unavailable`, `internal`, `conversation_deleted`), if the message can't be stored,
+or if the client is gone before the stream opens, so the run never starts (the question
+stays stored, unanswered, and is left out of later turns' history like any unanswered one).
 A refund goes back to the UTC day the message was counted on. A player who disconnects
-mid-answer still uses their slot: the run carries on and stores the answer, which they find
-on their next visit. A 429 takes no slot in either limit. If the API process dies mid-run, the
-day's slot stays taken (and the minute's goes with the process).
+mid-answer still uses their slot: the run is not cancelled, and it stores the answer, which
+they find on their next visit. Cancelling would save the rest of the provider calls but lose
+that answer, and the run has no cheap way to stop mid-call, so it is left to finish. A 429
+takes no slot in either limit. If the API process dies mid-run, the day's slot stays taken
+(and the minute's goes with the process).
+
+Slots are taken before the run, not after the answer: a message holds its slot for the whole
+turn and only gets it back if the turn fails. So a message sent while another is still
+running can get a 429 for a slot the running one later gives back. That is a deliberate
+trade-off: taking the slot first is what stops two messages from both getting the last one,
+and the player who was refused can send again after `retry_after`.
 
 Each of these steps is its own short transaction, run one after another, so a message never
 holds two pooled connections at once.
