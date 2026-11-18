@@ -371,9 +371,10 @@ exposes it.
 Decks are per account, with the same ownership rules (someone else's deck is a 404):
 
 - `POST /decks/preview` (`decklist`) runs import validation without saving.
-- `POST /decks` (`name`, at most 100 characters, and `decklist`), `GET /decks` (summaries,
+- `POST /decks` (`name`, trimmed, 1 to 100 characters, and `decklist`), `GET /decks` (summaries,
   most recently updated first), `GET /decks/{id}`, `PUT /decks/{id}` (replaces name and
   text), `DELETE /decks/{id}`. Deleting the Supabase account cascades to its decks.
+  Names needn't be unique: decks are told apart, and @-mentioned, by id.
 - Create, read, update and preview return the validation: every section with its lines,
   each resolved to a card (`oracle_id`, `oracle_name`) or `null` with close-name
   suggestions, plus a list of typed warnings (`malformed_line`, `outside_section`,

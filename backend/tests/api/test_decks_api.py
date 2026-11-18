@@ -168,11 +168,31 @@ def test_reading_a_deck_validates_it_against_the_current_cards(
     assert _section(read["validation"], "Legend")[0]["card"]["oracle_name"] == "Annie, Dark Child"
 
 
-@pytest.mark.parametrize("name", ["", "x" * 101])
-def test_a_deck_name_must_be_present_and_short(client: TestClient, name: str) -> None:
-    response = client.post("/decks", json={"name": name, "decklist": ""}, headers=_as(ALICE))
+@pytest.mark.parametrize("name", ["", "   \t", "x" * 101])
+def test_a_deck_name_must_be_present_and_short(
+    client: TestClient, decks: InMemoryDeckStore, name: str
+) -> None:
+    saved = decks.create(ALICE, "Kept", "")
 
-    assert response.status_code == 422
+    create = client.post("/decks", json={"name": name, "decklist": ""}, headers=_as(ALICE))
+    rename = client.put(
+        f"/decks/{saved.id}", json={"name": name, "decklist": ""}, headers=_as(ALICE)
+    )
+
+    assert (create.status_code, rename.status_code) == (422, 422)
+    assert decks.list_for_user(ALICE) == [saved]
+
+
+def test_a_deck_name_is_saved_without_surrounding_spaces_and_need_not_be_unique(
+    client: TestClient,
+) -> None:
+    body = {"name": "  Annie burn \n", "decklist": ""}
+
+    first = client.post("/decks", json=body, headers=_as(ALICE)).json()
+    second = client.post("/decks", json=body, headers=_as(ALICE)).json()
+
+    assert first["name"] == second["name"] == "Annie burn"
+    assert first["id"] != second["id"]
 
 
 def _capped_client(decks: InMemoryDeckStore, max_chars: int) -> TestClient:

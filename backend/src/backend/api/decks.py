@@ -3,9 +3,10 @@ validates without saving. Someone else's deck is a plain 404."""
 
 import uuid
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, StringConstraints
 
 from backend.api.dependencies import Decks, User
 from backend.decks.importing import DeckImport
@@ -19,7 +20,12 @@ class DecklistIn(BaseModel):
 
 
 class DeckIn(DecklistIn):
-    name: str = Field(min_length=1, max_length=MAX_DECK_NAME_CHARS)
+    """A deck to save. Names are trimmed and needn't be unique: decks are told apart, and
+    @-mentioned, by id."""
+
+    name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_DECK_NAME_CHARS)
+    ]
 
 
 class CardRefOut(BaseModel):
