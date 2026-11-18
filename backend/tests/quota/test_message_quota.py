@@ -1,4 +1,7 @@
+import threading
+import time
 import uuid
+from collections import deque
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -6,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 import pytest
 
 from backend.config import InvalidConfigError
+from backend.quota import admission
 from backend.quota.admission import (
     DEFAULT_MESSAGES_PER_DAY,
     DEFAULT_MESSAGES_PER_MINUTE,
@@ -108,6 +112,45 @@ def test_a_throttled_message_does_not_count_against_the_day() -> None:
     quota.reserve(ALICE)
     clock.advance(minutes=1)
     assert _refusal(quota).code == "daily_quota_reached"
+
+
+class _DequeThatYields(deque[datetime]):
+    """Hands the GIL to another thread right after its length is read, which widens the
+    gap between counting the minute's slots and taking one far enough for threads to hit."""
+
+    def __len__(self) -> int:
+        length = super().__len__()
+        time.sleep(0.001)
+        return length
+
+
+def test_messages_sent_at_once_never_take_more_than_the_minutes_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(admission, "deque", _DequeThatYields)
+    senders, per_minute = 8, 3
+    quota = _quota(
+        QuotaSettings(messages_per_minute=per_minute, messages_per_day=1000), FakeClock(EVENING)
+    )
+    together = threading.Barrier(senders)
+    sent: list[bool] = []
+
+    def send() -> None:
+        together.wait()
+        try:
+            quota.reserve(ALICE)
+        except QuotaExceededError:
+            sent.append(False)
+        else:
+            sent.append(True)
+
+    threads = [threading.Thread(target=send) for _ in range(senders)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sent.count(True) == per_minute
 
 
 def test_limits_must_be_positive() -> None:
