@@ -226,7 +226,7 @@ def format_mentions(mentions: Sequence[Mentioned]) -> str:
 
 
 def _conversation(state: AgentState) -> str:
-    """The conversation so far, then whatever the latest question @-mentions."""
+    """The conversation so far, then what it @-mentions (the latest question's first)."""
     turns = [*state.get("history", []), ("user", state["question"])]
     conversation = "\n".join(f"{role}: {content}" for role, content in turns)
     mentions = state.get("mentions", [])
