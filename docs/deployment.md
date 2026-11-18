@@ -36,9 +36,22 @@ command, and a dummy `DATABASE_URL`. These are resident memory (RSS) figures, on
 | API idle (`backend serve`, no model loaded) | ~120 MB |
 | API with the model loaded, plus 20 query embeddings | ~370 MB |
 
-The number to plan for is **about 370 MB**. Today the API never loads the model. Once the chat
-endpoint (issue #12) embeds questions, the first chat request loads it. Pinning the process to
-1 or 2 cores didn't change these figures. Bulk ingestion peaks around 1.2 GB, but it's a manual
+Those figures predate the chat path. Re-measured on 2026-11-17 (review fix) with everything a
+chat message touches, in the dev environment (Python 3.13, the same lock) rather than a
+`--no-dev` install, against dummy database and Supabase URLs and dummy provider keys, so
+nothing was contacted:
+
+| State | RSS |
+| --- | --- |
+| `backend serve` idle: the production app built, with the coach, the provider chain, LangGraph and the quota | ~175 MB |
+| The same app after one streamed agent run (scripted model) | ~175 MB |
+| Plus the embedding model loaded and 20 query embeddings | ~400-420 MB |
+
+The number to plan for is **about 420 MB**. The chat path embeds every question for retrieval,
+so the first chat message loads the model and it stays loaded for the life of the process. Not
+measured: a real provider round trip and a live Postgres connection, which add their HTTP and
+driver buffers on top (expected to be small, but unverified). Pinning the process to 1 or 2
+cores didn't change the earlier figures. Bulk ingestion peaks around 1.2 GB, but it's a manual
 step run from a dev machine, never on the host.
 
 On one core, the API started in about 1.6 s, the model loaded in 0.6 s and each query
@@ -53,13 +66,13 @@ The image itself was not built here. It still needs a `docker build` and a memor
 All checked on 2026-11-17 against each host's own docs. Free tiers change often, so all of
 these are **unverified until the account is actually created**.
 
-| Host | Free memory | Fits ~370 MB? | Idle behaviour | Catches |
+| Host | Free memory | Fits ~420 MB? | Idle behaviour | Catches |
 | --- | --- | --- | --- | --- |
-| [Render](https://render.com/docs/free) free web service | 512 MB, 0.1 CPU | Yes, ~140 MB headroom | Spins down after 15 min idle; waking takes ~1 min | 750 instance hours/month; may restart at any time |
-| [Koyeb](https://www.koyeb.com/docs/reference/instances) free instance | 512 MB, 0.1 vCPU | Yes, ~140 MB headroom | Scales to zero after 1 h idle; waking takes 1-5 s | Credit card required; Frankfurt or Washington only; Koyeb is joining Mistral AI and the pricing page no longer advertises the free tier (still in the [FAQ](https://www.koyeb.com/docs/faqs/pricing)) |
+| [Render](https://render.com/docs/free) free web service | 512 MB, 0.1 CPU | Yes, ~90 MB headroom | Spins down after 15 min idle; waking takes ~1 min | 750 instance hours/month; may restart at any time |
+| [Koyeb](https://www.koyeb.com/docs/reference/instances) free instance | 512 MB, 0.1 vCPU | Yes, ~90 MB headroom | Scales to zero after 1 h idle; waking takes 1-5 s | Credit card required; Frankfurt or Washington only; Koyeb is joining Mistral AI and the pricing page no longer advertises the free tier (still in the [FAQ](https://www.koyeb.com/docs/faqs/pricing)) |
 | [Google Cloud Run](https://cloud.google.com/run/pricing) | Configurable (512 MiB to 1 GiB is fine) | Yes, and memory can be raised | Scales to zero; cold start on each wake-up | Billing account (card) required; free tier is 360,000 GiB-s and 180,000 vCPU-s per month on request-based billing |
 | [Fly.io](https://docs.fly.io/about/pricing) | No free tier ($1 trial credit) | 512 MB machine $3.69/month | Machines can auto-stop | [Bills under $5 waived](https://docs.fly.io/about/free-waiver) once a card is added, so in practice free but card-backed |
-| [Railway](https://docs.railway.com/pricing/plans) Free plan | 0.5 GB | Barely | Always on, until the credit runs out | $1/month of credit covers about 100 MB-month of RAM, far short of an always-on 370 MB service |
+| [Railway](https://docs.railway.com/pricing/plans) Free plan | 0.5 GB | Barely | Always on, until the credit runs out | $1/month of credit covers about 100 MB-month of RAM, far short of an always-on 420 MB service |
 | [Hugging Face Spaces](https://huggingface.co/docs/hub/spaces-overview) | 16 GB CPU Basic | Yes | Sleeps when unused | Docker Spaces now need a paid PRO plan; only static Spaces are free |
 
 ## Recommendation (pending the human's decision)
@@ -67,14 +80,14 @@ these are **unverified until the account is actually created**.
 **Render's free web service.** It's the only option that is free, needs no credit card, runs
 the Dockerfile directly from the repo (Docker build context `backend`, Dockerfile path
 `backend/Dockerfile`), and leaves
-about 140 MB of headroom over the measured footprint. The cost is a cold start of about a
+about 90 MB of headroom over the measured footprint. The cost is a cold start of about a
 minute after 15 idle minutes. That's acceptable for a portfolio demo, and the frontend can
 show a "waking up" state.
 
 - **Runner-up: Koyeb.** Same memory, and its cold starts are much faster. But it needs a card,
   and the free tier's future is uncertain after the Mistral acquisition.
-- **If 512 MB turns out too tight** (once the agent's real request path is measured with
-  #12 merged): Cloud Run, with a 1 GiB service. A demo's traffic should stay well inside
+- **If 512 MB turns out too tight** (the headroom is thin now that the chat path is
+  measured, and a real request adds a little on top): Cloud Run, with a 1 GiB service. A demo's traffic should stay well inside
   the free GiB-seconds. It needs a billing account.
 
 ## Keep-alive

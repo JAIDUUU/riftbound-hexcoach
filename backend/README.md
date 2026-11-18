@@ -108,8 +108,8 @@ merges the two rankings with reciprocal rank fusion; `--keyword-only` skips the 
 Memory footprint (matters for hosting): embedding a query costs about **270 MB RSS** for
 the whole Python process with the model loaded. Bulk ingestion peaks around **1.2 GB RSS**
 (batches of 32 passages; fastembed's default batch of 256 peaked near 7 GB) and takes
-roughly two minutes for the ~2,500 rule chunks on CPU. The API process with the model
-loaded measured about **370 MB RSS** (see `docs/deployment.md`).
+roughly two minutes for the ~2,500 rule chunks on CPU. The API process with the whole
+chat path built and the model loaded measured about **420 MB RSS** (see `docs/deployment.md`).
 
 `eval-retrieval` uploads the golden set (`data/golden/golden-set.yaml`, hand-written rulings
 with the Core Rules ids a correct answer must cite) to the Langfuse dataset `hexcoach-golden`
