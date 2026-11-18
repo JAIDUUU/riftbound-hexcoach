@@ -17,7 +17,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from backend.agent.coach import Coach
 from backend.agent.tracing import ScoreClient
 from backend.api.auth import AuthenticatedUser, AuthError, AuthUnavailableError, TokenVerifier
-from backend.api.turn import OpenCards, OpenStore
+from backend.api.cards import OpenCards
+from backend.api.turn import OpenStore
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.decks.access import DeckAccess, OpenDecks

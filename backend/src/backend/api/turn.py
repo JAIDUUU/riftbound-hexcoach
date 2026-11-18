@@ -31,9 +31,7 @@ from pydantic import BaseModel
 from backend.agent.citations import cited_evidence
 from backend.agent.coach import Coach, Question, Reply
 from backend.agent.graph import AgentEvent, Outcome, Reset, Started, Step, StepName, Token
-from backend.cards.catalog import CardCatalog
-from backend.cards.images import preview_image_url
-from backend.cards.tags import ValidatedCard, validate_card_tags
+from backend.api.cards import CardOut, OpenCards, validated_cards
 from backend.conversations.store import ConversationStore
 from backend.llm.providers import AllProvidersFailedError
 from backend.retrieval.repository import SearchHit, SourceType
@@ -42,9 +40,6 @@ _log = logging.getLogger(__name__)
 
 OpenStore = Callable[[], AbstractContextManager[ConversationStore]]
 """Opens a store for one unit of work; leaving the context commits (or rolls back on error)."""
-
-OpenCards = Callable[[], AbstractContextManager[CardCatalog]]
-"""Opens the card catalog that a finished answer's Card tags are checked against."""
 
 Emit = Callable[[ServerSentEvent], None]
 
@@ -84,31 +79,6 @@ class CitationOut(BaseModel):
         )
 
 
-class CardOut(BaseModel):
-    """A Card the answer tags: what a hover preview shows, and its text fallback.
-
-    `tags` is every distinct way the answer wrote the card (trimmed), so the client can
-    match each `[[...]]` in `text` to its card; a tag listed nowhere is plain text.
-    """
-
-    oracle_id: str
-    oracle_name: str
-    tags: list[str]
-    image_url: str
-    cleaned_text: str
-
-    @classmethod
-    def of(cls, validated: ValidatedCard) -> "CardOut":
-        card = validated.card
-        return cls(
-            oracle_id=card.oracle_id,
-            oracle_name=card.oracle_name,
-            tags=list(validated.tags),
-            image_url=preview_image_url(card),
-            cleaned_text=card.cleaned_text,
-        )
-
-
 class FinalData(BaseModel):
     text: str
     outcome: Outcome
@@ -143,22 +113,6 @@ class PreparedTurn:
 
 def citations(reply: Reply) -> list[CitationOut]:
     return [CitationOut.of(hit) for hit in cited_evidence(reply.answer, reply.evidence)]
-
-
-def validated_cards(answer: str, open_cards: OpenCards | None) -> list[CardOut]:
-    """The Cards the answer tags, checked once against the finished text (ADR 0005).
-
-    Runs after the answer is stored, so a failure here leaves every tag as plain text
-    rather than turning a delivered answer into an `error`.
-    """
-    if open_cards is None:
-        return []
-    try:
-        with open_cards() as cards:
-            return [CardOut.of(validated) for validated in validate_card_tags(answer, cards)]
-    except Exception:
-        _log.exception("Card tags could not be validated; sending them as plain text")
-        return []
 
 
 def run_turn(

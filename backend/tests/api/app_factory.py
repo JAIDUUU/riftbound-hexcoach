@@ -16,8 +16,10 @@ from backend.agent.coach import Coach
 from backend.agent.tracing import ScoreClient
 from backend.api.app import create_app
 from backend.api.auth import TokenVerifier
+from backend.api.cards import OpenCards
 from backend.api.dependencies import DeleteAccount, PingDatabase
-from backend.api.turn import OpenCards, OpenStore
+from backend.api.turn import OpenStore
+from backend.cards.catalog import CardCatalog
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
 from backend.decks.access import OpenDecks
@@ -37,6 +39,14 @@ def opening(store: ConversationStore) -> OpenStore:
         yield store
 
     return open_store
+
+
+def opening_cards(catalog: CardCatalog) -> OpenCards:
+    @contextmanager
+    def open_cards() -> Generator[CardCatalog]:
+        yield catalog
+
+    return open_cards
 
 
 def make_app(

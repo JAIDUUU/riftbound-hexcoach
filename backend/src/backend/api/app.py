@@ -28,8 +28,9 @@ from backend.agent.coach import Coach
 from backend.agent.tracing import ScoreClient, langfuse_scores
 from backend.api import account, conversations, decks, feedback, health, messages
 from backend.api.auth import TokenVerifier, supabase_verifier
+from backend.api.cards import OpenCards
 from backend.api.dependencies import Collaborators, DeleteAccount, PingDatabase
-from backend.api.turn import OpenCards, OpenStore
+from backend.api.turn import OpenStore
 from backend.cards.catalog import CardCatalog, SqlCardCatalog
 from backend.config import cors_allowed_origins, supabase_url
 from backend.conversations.limits import (
