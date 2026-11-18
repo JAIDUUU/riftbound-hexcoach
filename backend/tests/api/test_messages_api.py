@@ -365,7 +365,10 @@ def test_a_message_over_the_cap_is_a_plain_422_before_any_stream_opens() -> None
     response = _post(store, coach, conversation.id, {"content": "x" * 11}, _as(ALICE))
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Message is 11 characters; the limit is 10."}
+    assert response.json() == {
+        "detail": "Message is 11 characters; the limit is 10.",
+        "code": "message_too_long",
+    }
     assert coach.questions == []
 
 
@@ -614,7 +617,7 @@ def test_an_unknown_mention_is_a_plain_422_and_nothing_is_stored_or_run(
     )
 
     assert response.status_code == 422
-    assert response.json() == {"detail": f"No {kind} with id {unknown}."}
+    assert response.json() == {"detail": f"No {kind} with id {unknown}.", "code": f"unknown_{kind}"}
     assert coach.questions == []
     detail = store.get(ALICE, conversation.id)
     assert detail is not None and detail.messages == ()
@@ -629,7 +632,7 @@ def test_someone_elses_deck_is_refused_like_a_missing_one(
     response = _mention(store, coach, library, [{"kind": "deck", "id": str(bobs.id)}])
 
     assert response.status_code == 422
-    assert response.json() == {"detail": f"No deck with id {bobs.id}."}
+    assert response.json() == {"detail": f"No deck with id {bobs.id}.", "code": "unknown_deck"}
     assert coach.questions == []
 
 
@@ -667,7 +670,10 @@ def test_more_mentions_than_the_cap_is_a_plain_422(
     )
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Message has 3 mentions; the limit is 2."}
+    assert response.json() == {
+        "detail": "Message has 3 mentions; the limit is 2.",
+        "code": "too_many_mentions",
+    }
     assert coach.questions == []
     detail = store.get(ALICE, conversation.id)
     assert detail is not None and detail.messages == ()

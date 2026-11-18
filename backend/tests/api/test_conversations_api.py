@@ -138,7 +138,10 @@ def test_a_player_message_over_the_cap_is_a_422_not_a_500() -> None:
     response = TestClient(app).post(f"/probe/{conversation.id}", headers=_as(ALICE))
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Message is 11 characters; the limit is 10."}
+    assert response.json() == {
+        "detail": "Message is 11 characters; the limit is 10.",
+        "code": "message_too_long",
+    }
 
 
 def test_a_malformed_conversation_id_is_a_validation_error(client: TestClient) -> None:

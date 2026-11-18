@@ -18,7 +18,7 @@ the real agent, Langfuse and the CORS origins from the environment. Serve it wit
 import uuid
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,18 +32,44 @@ from backend.api.dependencies import Collaborators, DeleteAccount, PingDatabase
 from backend.api.turn import OpenCards, OpenStore
 from backend.cards.catalog import CardCatalog, SqlCardCatalog
 from backend.config import cors_allowed_origins, supabase_url
-from backend.conversations.limits import Limits, MessageTooLongError, limits_from_env
+from backend.conversations.limits import (
+    Limits,
+    MessageTooLongError,
+    TooManyMentionsError,
+    limits_from_env,
+)
 from backend.conversations.store import ConversationStore, SqlConversationStore
 from backend.decks.access import DeckAccess, OpenDecks
 from backend.decks.importing import DecklistTooLongError, max_decklist_chars_from_env
 from backend.decks.store import SqlDeckStore
+from backend.mentions import UnknownMentionError
 from backend.quota.admission import MessageQuota, QuotaExceededError, quota_settings_from_env
 from backend.quota.store import SqlUsageStore, UsageStore
 
+RefusalCode = Literal[
+    "message_too_long", "decklist_too_long", "too_many_mentions", "unknown_card", "unknown_deck"
+]
+"""Why a player's message or decklist was refused with a 422 (request validation errors
+keep FastAPI's own shape)."""
 
-def _too_long(request: Request, error: Exception) -> JSONResponse:
+
+_REFUSAL_CODES: dict[type[Exception], RefusalCode] = {
+    MessageTooLongError: "message_too_long",
+    DecklistTooLongError: "decklist_too_long",
+    TooManyMentionsError: "too_many_mentions",
+}
+
+
+def _refusal_code(error: Exception) -> RefusalCode:
+    if isinstance(error, UnknownMentionError):
+        return "unknown_card" if error.mention.kind == "card" else "unknown_deck"
+    return _REFUSAL_CODES[type(error)]
+
+
+def _refused(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": str(error)}
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": str(error), "code": _refusal_code(error)},
     )
 
 
@@ -107,8 +133,8 @@ def create_app(
     )
     # App-wide: the caps are enforced in the store and in import_decklist, so any endpoint
     # that takes a player message or decklist gets a clear 422 rather than a 500.
-    app.add_exception_handler(MessageTooLongError, _too_long)
-    app.add_exception_handler(DecklistTooLongError, _too_long)
+    for refusal in (*_REFUSAL_CODES, UnknownMentionError):
+        app.add_exception_handler(refusal, _refused)
     app.add_exception_handler(QuotaExceededError, _quota_exceeded)
     for area in (conversations, messages, feedback, decks, account, health):
         app.include_router(area.router)

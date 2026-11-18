@@ -188,7 +188,10 @@ def test_a_decklist_over_the_size_cap_is_a_plain_422_and_nothing_is_saved(
     client = _capped_client(decks, max_chars=10)
     saved = decks.create(ALICE, "Short", "Runes:")
     too_long = "x" * 11
-    expected = {"detail": "Decklist is 11 characters; the limit is 10."}
+    expected = {
+        "detail": "Decklist is 11 characters; the limit is 10.",
+        "code": "decklist_too_long",
+    }
 
     preview = client.post("/decks/preview", json={"decklist": too_long}, headers=_as(ALICE))
     create = client.post("/decks", json={"name": "Long", "decklist": too_long}, headers=_as(ALICE))

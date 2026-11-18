@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
@@ -15,8 +15,7 @@ from backend.api.auth import AuthenticatedUser
 from backend.api.conversations import conversation_not_found
 from backend.api.dependencies import User, collaborators
 from backend.api.turn import PreparedTurn, stream_turn
-from backend.conversations.limits import TooManyMentionsError
-from backend.mentions import UnknownMentionError, resolve_mentions
+from backend.mentions import resolve_mentions
 from backend.turns import Mention, Mentioned, MentionKind, answered_turns
 
 _log = logging.getLogger(__name__)
@@ -59,16 +58,14 @@ class MessageIn(BaseModel):
 def _check_and_resolve_mentions(
     request: Request, user_id: uuid.UUID, mentions: Sequence[MentionIn]
 ) -> tuple[Mentioned, ...]:
-    """Hold the mentions to the cap, then resolve them; either failing is a 422."""
+    """Hold the mentions to the cap, then resolve them; either failing is a 422 (the
+    app's handlers for TooManyMentionsError and UnknownMentionError)."""
     if not mentions:
         return ()
     app = collaborators(request)
-    try:
-        app.limits.check_mentions(len(mentions))
-        with app.open_decks() as access:
-            return resolve_mentions([Mention(m.kind, m.id) for m in mentions], user_id, access)
-    except (TooManyMentionsError, UnknownMentionError) as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from None
+    app.limits.check_mentions(len(mentions))
+    with app.open_decks() as access:
+        return resolve_mentions([Mention(m.kind, m.id) for m in mentions], user_id, access)
 
 
 def begin_turn(

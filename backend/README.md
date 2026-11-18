@@ -220,6 +220,19 @@ chip's name in `content`. A card id that doesn't exist, a deck that isn't the pl
 more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and nothing is
 stored or run.
 
+These refusals carry a `code` the frontend can branch on, as the 429s below do:
+
+```json
+{"detail": "No card with id f30de1e6-73f9-4b64-9211-791d0fc422e7.", "code": "unknown_card"}
+```
+
+`code` is `message_too_long` (over `MAX_MESSAGE_CHARS`, on any endpoint that takes a player
+message), `too_many_mentions`, `unknown_card` (a card id the cards table doesn't have, for
+example from an outdated client card index), `unknown_deck` (deleted, or not the player's) or
+`decklist_too_long` (the deck endpoints, below). A malformed body, such as an empty message or
+a mention of an unknown kind, keeps FastAPI's validation error shape: a `detail` list and no
+`code`.
+
 ```bash
 curl -N -X POST "http://127.0.0.1:8000/conversations/$CONVERSATION_ID/messages" \
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
@@ -357,7 +370,7 @@ Decks are per account, with the same ownership rules (someone else's deck is a 4
   `unknown_section`, `unknown_card`, `section_size`, `copy_limit`). Warnings never block
   saving.
 - A decklist over `MAX_DECKLIST_CHARS` (default 4000, an unverified placeholder) is a 422
-  on preview, create and update, and nothing is saved. Reading a deck saved before the cap
+  with `code` `decklist_too_long` on preview, create and update, and nothing is saved. Reading a deck saved before the cap
   was lowered still works.
 
 Decklists are parsed in code (`backend/decks/parse.py`), never by the LLM: one header per
