@@ -385,7 +385,12 @@ Decks are per account, with the same ownership rules (someone else's deck is a 4
 
 Decklists are parsed in code (`backend/decks/parse.py`), never by the LLM: one header per
 section (Legend, Champion, MainDeck, Battlefields, Runes, Sideboard) and `<count> <name>`
-lines, where names can contain commas and colons. Only the text is stored. Validation is
+lines, where names can contain commas and colons. Headers ignore case, spaces, hyphens and
+underscores, singular or plural, the colon, and a section count (`Main Deck (40):`,
+`rune (12)`); the Core Rules' names (`Champion Legend`, `Chosen Champion`, `Rune Deck`) work
+too. Any other header with a colon or a count (`Tokens:`, `Tokens (2)`) is an
+`unknown_section`: it is reported and the cards under it are left out of every section,
+rather than counted toward the one before it. Only the text is stored. Validation is
 recomputed from it on every read, so a card snapshot refresh is picked up. Cards resolve
 through the same oracle-name/alias matcher and alias-aware suggestions as `lookup_card`
 (`backend/cards/catalog.py`). `import_decklist` (`backend/decks/importing.py`) is the one

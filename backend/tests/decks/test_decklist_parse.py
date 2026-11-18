@@ -118,3 +118,39 @@ def test_empty_text_parses_to_nothing() -> None:
     assert parse_decklist("") == parse_decklist("  \n\n\t\n")
     assert parse_decklist("").lines == ()
     assert parse_decklist("").warnings == ()
+
+
+def test_headers_accept_trailing_counts_hyphens_and_singular_or_plural_names() -> None:
+    text = (
+        "LEGENDS\n1 Annie, Dark Child\n"
+        "Chosen Champion:\n1 Sona, Harmonious\n"
+        "Main Deck (40):\n3 Pouty Poro\n"
+        "main-deck\n1 Recruit\n"
+        "Battlefield (3)\n1 Field A\n"
+        "Rune Deck: (12)\n6 Fury Rune\n"
+        "Side_board:\n1 Salvage\n"
+    )
+
+    parsed = parse_decklist(text)
+
+    assert [(line.section, line.name) for line in parsed.lines] == [
+        ("Legend", "Annie, Dark Child"),
+        ("Champion", "Sona, Harmonious"),
+        ("MainDeck", "Pouty Poro"),
+        ("MainDeck", "Recruit"),
+        ("Battlefields", "Field A"),
+        ("Runes", "Fury Rune"),
+        ("Sideboard", "Salvage"),
+    ]
+    assert parsed.warnings == ()
+
+
+def test_an_unknown_header_with_a_count_is_an_unknown_section_even_without_a_colon() -> None:
+    parsed = parse_decklist("MainDeck:\n3 Pouty Poro\nTokens (2)\n2 Bird\nRunes:\n6 Fury Rune")
+
+    assert [(line.section, line.name) for line in parsed.lines] == [
+        ("MainDeck", "Pouty Poro"),
+        ("Runes", "Fury Rune"),
+    ]
+    assert [(w.kind, w.line) for w in parsed.warnings] == [("unknown_section", 3)]
+    assert parsed.warnings[0].message.startswith("'Tokens' is not a deck section")
