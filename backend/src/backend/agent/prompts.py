@@ -73,7 +73,8 @@ answering step can read any card's current text from the card database by name. 
 on whether the governing rules and rulings are covered."""
 
 MENTIONS_NOTE = """\
-The player explicitly referenced these cards and decks with @ in their latest message.
+The player explicitly referenced these cards and decks with @ in this conversation, those
+of their latest message first.
 A card's text below is its current text from the card database: treat it as card-text
 evidence and cite it by card name. A deck is listed as card names only, without counts
 or card text; lines marked unrecognised are names the player wrote that match no card in

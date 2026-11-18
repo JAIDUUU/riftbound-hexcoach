@@ -56,16 +56,17 @@ class MessageIn(BaseModel):
 
 
 def _check_and_resolve_mentions(
-    request: Request, user_id: uuid.UUID, mentions: Sequence[MentionIn]
+    request: Request, user_id: uuid.UUID, mentions: Sequence[Mention], earlier: Sequence[Mention]
 ) -> tuple[Mentioned, ...]:
-    """Hold the mentions to the cap, then resolve them; either failing is a 422 (the
-    app's handlers for TooManyMentionsError and UnknownMentionError)."""
-    if not mentions:
+    """Hold the message's mentions to the cap, then resolve them and the earlier ones;
+    the message's own failing is a 422 (the app's handlers for TooManyMentionsError and
+    UnknownMentionError)."""
+    if not mentions and not earlier:
         return ()
     app = collaborators(request)
     app.limits.check_mentions(len(mentions))
     with app.open_decks() as access:
-        return resolve_mentions([Mention(m.kind, m.id) for m in mentions], user_id, access)
+        return resolve_mentions(mentions, user_id, access, earlier)
 
 
 def begin_turn(
@@ -89,18 +90,24 @@ def begin_turn(
     if history is None:
         raise conversation_not_found()
     app.limits.check_message(body.content)
-    mentions = _check_and_resolve_mentions(request, user.id, body.mentions)
+    kept = answered(history)
+    sent = [Mention(m.kind, m.id) for m in body.mentions]
+    earlier = [m for message in reversed(kept) for m in message.mentions]  # newest first
+    mentions = _check_and_resolve_mentions(request, user.id, sent, earlier)
     refund = _reserve_slot(request, user)
     try:
         with app.open_store() as store:
-            if store.add_message(user.id, conversation_id, "user", body.content) is None:
+            stored = store.add_message(
+                user.id, conversation_id, "user", body.content, mentions=sent
+            )
+            if stored is None:
                 raise conversation_not_found()  # deleted since its history was read
     except BaseException:
         _refund_quietly(refund)
         raise
     question = Question(
         text=body.content,
-        history=tuple((message.role, message.content) for message in answered(history)),
+        history=tuple((message.role, message.content) for message in kept),
         user_id=user.id,
         conversation_id=conversation_id,
         mentions=mentions,

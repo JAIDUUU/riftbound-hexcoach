@@ -18,6 +18,7 @@ from backend.conversations.store import (
     NotAnAnswerError,
     SqlConversationStore,
 )
+from backend.turns import Mention
 from tests.conversations.memory_store import InMemoryConversationStore
 
 LIMITS = Limits(max_message_chars=50, max_history_messages=3)
@@ -214,3 +215,20 @@ def test_a_new_message_moves_its_conversation_to_the_top(harness: Harness) -> No
     harness.store.add_message(alice, older.id, "user", "bump")
 
     assert [c.id for c in harness.store.list_for_user(alice)] == [older.id, newer.id]
+
+
+def test_a_message_keeps_what_it_mentioned(harness: Harness) -> None:
+    alice = harness.new_user()
+    conversation = harness.store.create(alice, None)
+    mentions = (Mention("card", uuid.uuid4()), Mention("deck", uuid.uuid4()))
+
+    sent = harness.store.add_message(alice, conversation.id, "user", "Q?", mentions=mentions)
+    answer = harness.store.add_message(alice, conversation.id, "assistant", "A.")
+
+    assert sent is not None and sent.mentions == mentions
+    assert answer is not None and answer.mentions == ()
+    detail = harness.store.get(alice, conversation.id)
+    history = harness.store.history(alice, conversation.id)
+    assert detail is not None and history is not None
+    assert [m.mentions for m in detail.messages] == [mentions, ()]
+    assert [m.mentions for m in history] == [mentions, ()]

@@ -8,6 +8,7 @@ every LLM-bound history read goes through.
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, cast
@@ -26,7 +27,7 @@ from sqlalchemy import (
 
 from backend.conversations.limits import Limits
 from backend.conversations.schema import conversations_table, messages_table
-from backend.turns import Role
+from backend.turns import Mention, MentionKind, Role
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,7 @@ class Message:
     trace_id: str | None
     created_at: datetime
     feedback: Feedback | None = None
+    mentions: tuple[Mention, ...] = ()  # what a player message @-mentioned, as sent
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,10 +94,12 @@ class ConversationStore(Protocol):
         content: str,
         trace_id: str | None = None,
         message_id: uuid.UUID | None = None,
+        mentions: Sequence[Mention] = (),
     ) -> Message | None:
         """Append a message (player messages must fit the length cap); None if not the
         user's conversation. Raises MessageTooLongError over the cap. `message_id` lets
-        the caller fix the id before the content exists; by default a new one is made."""
+        the caller fix the id before the content exists; by default a new one is made.
+        `mentions` are stored as sent; nothing here checks they resolve."""
         ...
 
     def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
@@ -129,6 +133,7 @@ _MESSAGE_COLUMNS = (
     messages_table.c.created_at,
     messages_table.c.feedback,
     messages_table.c.feedback_given_at,
+    messages_table.c.mentions,
 )
 
 
@@ -150,6 +155,9 @@ def _message(row: RowMapping) -> Message:
         trace_id=row["trace_id"],
         created_at=row["created_at"],
         feedback=feedback,
+        mentions=tuple(
+            Mention(cast(MentionKind, m["kind"]), uuid.UUID(m["id"])) for m in row["mentions"]
+        ),
     )
 
 
@@ -209,6 +217,7 @@ class SqlConversationStore:
         content: str,
         trace_id: str | None = None,
         message_id: uuid.UUID | None = None,
+        mentions: Sequence[Mention] = (),
     ) -> Message | None:
         if role == "user":
             self.limits.check_message(content)
@@ -224,6 +233,7 @@ class SqlConversationStore:
             "role": role,
             "content": content,
             "trace_id": trace_id,
+            "mentions": [{"kind": m.kind, "id": str(m.id)} for m in mentions],
         }
         if message_id is not None:
             values["id"] = message_id

@@ -5,6 +5,7 @@ SqlConversationStore, so API tests built on this fake can't drift from productio
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
@@ -17,7 +18,7 @@ from backend.conversations.store import (
     NotAnAnswerError,
     Rating,
 )
-from backend.turns import Role
+from backend.turns import Mention, Role
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -73,6 +74,7 @@ class InMemoryConversationStore:
         content: str,
         trace_id: str | None = None,
         message_id: uuid.UUID | None = None,
+        mentions: Sequence[Mention] = (),
     ) -> Message | None:
         if role == "user":
             self.limits.check_message(content)
@@ -86,6 +88,7 @@ class InMemoryConversationStore:
             content=content,
             trace_id=trace_id,
             created_at=now,
+            mentions=tuple(mentions),
         )
         row.messages.append(message)
         row.conversation = replace(row.conversation, updated_at=now)

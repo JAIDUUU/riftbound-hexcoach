@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.agent.coach import Reply
+from backend.agent.coach import Question, Reply
 from backend.agent.graph import AgentEvent, Outcome, Reset, Started, Step, Token
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
@@ -538,12 +538,13 @@ def _mention(
     user: uuid.UUID = ALICE,
     conversation_id: uuid.UUID | None = None,
     limits: Limits | None = None,
+    content: str = "Does she ready runes?",
 ):
     if conversation_id is None:
         conversation_id = store.create(ALICE, None).id
     return _client(store, coach, open_decks=library.open, limits=limits, cards=library.cards).post(
         f"/conversations/{conversation_id}/messages",
-        json={"content": "Does she ready runes?", "mentions": mentions},
+        json={"content": content, "mentions": mentions},
         headers=_as(user),
     )
 
@@ -693,22 +694,73 @@ def test_a_malformed_mention_is_refused(
     assert coach.questions == []
 
 
-def test_a_turn_after_a_mentioning_one_sees_its_text_but_not_its_mentions(
+def _turn(
+    store: InMemoryConversationStore,
+    library: Library,
+    conversation_id: uuid.UUID,
+    mentions: list[dict[str, str]],
+    content: str = "Does she ready runes?",
+) -> Question:
+    """Send one message that gets answered; the question the coach was asked."""
+    coach = FakeCoach([Started(None)], Reply("Yes.", "answered", ()))
+    response = _mention(
+        store, coach, library, mentions, conversation_id=conversation_id, content=content
+    )
+    assert parse_sse(response.text)[-1].event == "final", response.text
+    [question] = coach.questions
+    return question
+
+
+def test_later_turns_see_earlier_mentions_again_after_their_own_and_each_once(
     store: InMemoryConversationStore, library: Library
 ) -> None:
-    conversation = store.create(ALICE, None)
-    first = FakeCoach([Started(None)], Reply("Yes.", "answered", ()))
-    _mention(
-        store, first, library, [{"kind": "card", "id": SONA_ID}], conversation_id=conversation.id
-    )
-    second = FakeCoach([Started(None)], Reply("Still yes.", "answered", ()))
+    conversation = store.create(ALICE, None).id
+    deck = library.decks.create(ALICE, "Sona ramp", SONA_DECK)
+    sona = {"kind": "card", "id": SONA_ID}
 
-    events = _ask(store, second, "And on her first turn?", conversation_id=conversation.id)
+    _turn(store, library, conversation, [sona])
+    second = _turn(store, library, conversation, [{"kind": "deck", "id": str(deck.id)}])
+    third = _turn(store, library, conversation, [sona], "And Sona again?")
 
-    assert events[-1].event == "final"
-    [question] = second.questions
-    assert question.history == (("user", "Does she ready runes?"), ("assistant", "Yes."))
-    assert question.mentions == ()
+    assert [m.name for m in second.mentions] == ["Sona ramp", "Sona, Harmonious"]
+    assert [m.name for m in third.mentions] == ["Sona, Harmonious", "Sona ramp"]
+    assert third.history[0] == ("user", "Does she ready runes?")  # the text is there too
+
+
+def test_only_mentions_in_the_history_window_come_back(library: Library) -> None:
+    store = InMemoryConversationStore(Limits(max_history_messages=2))
+    conversation = store.create(ALICE, None).id
+
+    _turn(store, library, conversation, [{"kind": "card", "id": SONA_ID}])
+    _turn(store, library, conversation, [])
+    third = _turn(store, library, conversation, [])
+
+    assert third.mentions == ()
+
+
+def test_an_earlier_mention_that_no_longer_resolves_is_skipped_silently(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None).id
+    deck = library.decks.create(ALICE, "Sona ramp", SONA_DECK)
+    _turn(store, library, conversation, [{"kind": "deck", "id": str(deck.id)}])
+    library.decks.delete(ALICE, deck.id)
+
+    later = _turn(store, library, conversation, [])
+
+    assert later.mentions == ()
+
+
+def test_a_reloaded_conversation_shows_what_each_message_mentioned(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None).id
+    _turn(store, library, conversation, [{"kind": "card", "id": SONA_ID}])
+    client = _client(store, FakeCoach(), open_decks=library.open)
+
+    detail = client.get(f"/conversations/{conversation}", headers=_as(ALICE)).json()
+
+    assert [m["mentions"] for m in detail["messages"]] == [[{"kind": "card", "id": SONA_ID}], []]
 
 
 def test_a_failure_while_building_final_ends_in_error_stores_nothing_and_refunds(

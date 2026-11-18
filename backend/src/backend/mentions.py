@@ -7,6 +7,10 @@ Card ids are oracle ids, the `id` of the client card index the `@` menu searches
 indistinguishable from a missing one. A mention that doesn't resolve refuses the whole
 message, before anything is stored or run.
 
+Mentions are stored with the message (as sent) and later turns re-inject the ones in their
+history window, resolved afresh after the turn's own. Those earlier mentions are lenient:
+one that no longer resolves (the deck was deleted, the card left the database) is skipped.
+
 Cards are injected with their full text. Decks are injected as card names only: each
 Card once, by oracle name, under its section, without counts or text. Lines that don't
 resolve to a Card are kept apart, as written, so the agent knows the deck holds cards it
@@ -60,11 +64,28 @@ def _deck(mention: Mention, user_id: uuid.UUID, access: DeckAccess) -> Mentioned
     )
 
 
+def _resolve(mention: Mention, user_id: uuid.UUID, access: DeckAccess) -> Mentioned:
+    if mention.kind == "card":
+        return _card(mention, access.cards)
+    return _deck(mention, user_id, access)
+
+
 def resolve_mentions(
-    mentions: Sequence[Mention], user_id: uuid.UUID, access: DeckAccess
+    mentions: Sequence[Mention],
+    user_id: uuid.UUID,
+    access: DeckAccess,
+    earlier: Sequence[Mention] = (),
 ) -> tuple[Mentioned, ...]:
-    """The mentions in request order, a repeated one once; raises UnknownMentionError."""
-    return tuple(
-        _card(mention, access.cards) if mention.kind == "card" else _deck(mention, user_id, access)
-        for mention in dict.fromkeys(mentions)
-    )
+    """The message's mentions in request order, then the `earlier` ones not among them,
+    each once. Raises UnknownMentionError for the message's own; earlier ones that don't
+    resolve are left out."""
+    current = dict.fromkeys(mentions)
+    resolved = [_resolve(mention, user_id, access) for mention in current]
+    for mention in dict.fromkeys(earlier):
+        if mention in current:
+            continue
+        try:
+            resolved.append(_resolve(mention, user_id, access))
+        except UnknownMentionError:
+            continue
+    return tuple(resolved)

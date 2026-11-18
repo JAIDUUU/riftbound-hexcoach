@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from backend.api.dependencies import Store, User
 from backend.conversations.limits import MAX_TITLE_CHARS
 from backend.conversations.store import Conversation, ConversationDetail, Message, Rating
-from backend.turns import Role
+from backend.turns import MentionKind, Role
 
 
 class ConversationIn(BaseModel):
@@ -33,6 +33,11 @@ class ConversationOut(BaseModel):
         )
 
 
+class MentionOut(BaseModel):
+    kind: MentionKind
+    id: uuid.UUID
+
+
 class MessageOut(BaseModel):
     id: uuid.UUID
     role: Role
@@ -40,6 +45,7 @@ class MessageOut(BaseModel):
     trace_id: str | None
     created_at: datetime
     feedback: Rating | None
+    mentions: list[MentionOut]  # what a player message @-mentioned, as sent
 
     @classmethod
     def of(cls, message: Message) -> "MessageOut":
@@ -50,6 +56,7 @@ class MessageOut(BaseModel):
             trace_id=message.trace_id,
             created_at=message.created_at,
             feedback=None if message.feedback is None else message.feedback.rating,
+            mentions=[MentionOut(kind=m.kind, id=m.id) for m in message.mentions],
         )
 
 

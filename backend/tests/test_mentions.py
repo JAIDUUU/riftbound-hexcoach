@@ -112,3 +112,18 @@ def test_a_deck_saved_before_the_size_cap_was_lowered_can_still_be_mentioned(
 
     assert isinstance(mentioned, MentionedDeck)
     assert mentioned.name == "Sona ramp"
+
+
+def test_earlier_mentions_follow_the_current_ones_each_once_and_unresolvable_ones_drop_out(
+    cards: InMemoryCardCatalog, cards_by_name: dict[str, Card]
+) -> None:
+    sona, annie = (
+        Mention("card", uuid.UUID(cards_by_name[name].oracle_id))
+        for name in ("Sona, Harmonious", "Annie, Dark Child")
+    )
+    gone = Mention("deck", uuid.uuid4())
+    access = DeckAccess(InMemoryDeckStore(), cards)
+
+    resolved = resolve_mentions([sona], ALICE, access, earlier=[gone, annie, sona])
+
+    assert [m.name for m in resolved] == ["Sona, Harmonious", "Annie, Dark Child"]

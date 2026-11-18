@@ -137,7 +137,8 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
 
 - `POST /conversations` (optional `title`, at most 200 characters), `GET /conversations`
   (most recently active first), `GET /conversations/{id}` (with messages, oldest first,
-  each carrying its trace id), `DELETE /conversations/{id}`.
+  each carrying its trace id, its feedback and, for a player message, its `mentions`),
+  `DELETE /conversations/{id}`.
 - Someone else's conversation is a plain 404, the same as one that doesn't exist.
 - Deleting a conversation cascades to its messages; deleting the Supabase account
   cascades to its conversations.
@@ -217,11 +218,17 @@ id is its `id` in the client card index (`data/cards/card-index.json`, the oracl
 deck's id is one of the player's saved decks. The agent sees each mentioned card's full
 text and each mentioned deck as card names only (each Card once, under its section, no
 counts or card text, with lines that match no Card listed as written and marked
-unrecognised), marked as cards the player explicitly referenced, for this turn only.
-Mentions aren't stored: later turns see the message's text, so the client should keep the
-chip's name in `content`. A card id that doesn't exist, a deck that isn't the player's, or
-more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and nothing is
-stored or run.
+unrecognised), marked as cards the player explicitly referenced.
+
+Mentions are stored with the message as sent (kind and id, migration 0013), and
+`GET /conversations/{id}` returns them on each player message so a reload can redraw the
+chips. Later turns see them again: the agent gets the current message's mentions, then those
+of the player messages in the history window (`MAX_HISTORY_MESSAGES`), newest first, each
+once, resolved afresh (a card's current text, a deck's current list). An earlier mention that
+no longer resolves (the deck was deleted, say) is skipped without a word. Only the current
+message's mentions are checked: a card id that doesn't exist, a deck that isn't the
+player's, or more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and
+nothing is stored or run.
 
 These refusals carry a `code` the frontend can branch on, as the 429s below do:
 
