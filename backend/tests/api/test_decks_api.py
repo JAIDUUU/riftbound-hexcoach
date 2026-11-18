@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.cards.collapse import Card
 from backend.decks.access import DeckAccess
+from backend.decks.construction import DeckRules
 from tests.api.app_factory import make_app
 from tests.api.tokens import mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
@@ -213,3 +214,25 @@ def test_a_deck_saved_before_the_cap_was_lowered_can_still_be_read(
 
     assert response.status_code == 200
     assert response.json()["decklist"] == "Runes:\n12 Fury Rune\n"
+
+
+def test_the_deck_rules_the_app_is_given_are_the_ones_every_route_checks(
+    decks: InMemoryDeckStore, cards_by_name: dict[str, Card]
+) -> None:
+    cards = InMemoryCardCatalog(cards_by_name.values())
+    two_runes = DeckRules(rune_cards=2)
+
+    @contextmanager
+    def open_decks() -> Generator[DeckAccess]:
+        yield DeckAccess(decks, cards, rules=two_runes)
+
+    client = TestClient(make_app(open_decks=open_decks))
+    decklist = "Runes:\n2 Fury Rune\n"
+
+    preview = client.post("/decks/preview", json={"decklist": decklist}, headers=_as(ALICE))
+    saved = client.post("/decks", json={"name": "Runes", "decklist": decklist}, headers=_as(ALICE))
+
+    for validation in (preview.json(), saved.json()["validation"]):
+        sizes = [w["message"] for w in validation["warnings"] if w["kind"] == "section_size"]
+        assert not [message for message in sizes if message.startswith("Runes")]
+        assert "Legend has 0 cards; a deck needs exactly 1." in sizes  # the rest still apply

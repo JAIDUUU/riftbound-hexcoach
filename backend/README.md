@@ -394,7 +394,9 @@ there. The structural numbers (`backend/decks/construction.py`) are **unverified
 placeholders read from the Core and Tournament Rules for constructed play: 1 Legend,
 1 Champion, a 40-card Main Deck counting the Champion, 3 unique Battlefields, 12 Runes, a
 Sideboard of at most 10, and at most 3 copies of a card across Champion, Main Deck and
-Sideboard.
+Sideboard. They are chosen in one place, `DeckAccess.rules` (`backend/decks/access.py`),
+which every deck route and deck mention imports through; a different format would be a
+different `DeckRules` there.
 
 ### Supabase's Data API is closed
 

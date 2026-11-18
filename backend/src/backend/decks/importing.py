@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from backend.cards.catalog import CardCatalog, close_names
 from backend.cards.collapse import Card
 from backend.config import positive_int_env
-from backend.decks.construction import CONSTRUCTED, DeckRules
+from backend.decks.construction import DeckRules
 from backend.decks.parse import DeckLine, Section, parse_decklist
 from backend.decks.warnings import DeckWarning
 
@@ -141,7 +141,7 @@ def _copy_limits(lines: Sequence[ResolvedLine], rules: DeckRules) -> list[DeckWa
 def import_decklist(
     text: str,
     cards: CardCatalog,
-    rules: DeckRules = CONSTRUCTED,
+    rules: DeckRules,
     *,
     max_chars: int | None = DEFAULT_MAX_DECKLIST_CHARS,
 ) -> DeckImport:
