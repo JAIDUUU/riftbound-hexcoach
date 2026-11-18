@@ -19,15 +19,14 @@ from langchain_core.tools import BaseTool
 from backend.agent.graph import (
     AgentState,
     ChatModel,
-    Mentioned,
     OnEvent,
     Retriever,
     Started,
-    Turn,
     run_agent,
 )
 from backend.config import optional_env
 from backend.conversations.store import Feedback
+from backend.turns import Mentioned, Turn
 
 
 def hash_user_id(user_id: str) -> str:

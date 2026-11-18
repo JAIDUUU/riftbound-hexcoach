@@ -1,40 +1,36 @@
+import asyncio
+import contextlib
 import json
 import uuid
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.agent.coach import Reply
-from backend.agent.graph import (
-    AgentEvent,
-    MentionedCard,
-    MentionedDeck,
-    Started,
-    Step,
-    Token,
-    Turn,
-)
-from backend.api.app import DeckAccess, OpenDecks, create_app
+from backend.agent.coach import Question, Reply
+from backend.agent.graph import AgentEvent, Outcome, Reset, Started, Step, Token
 from backend.cards.catalog import CardCatalog
 from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
-from backend.conversations.store import ConversationStore
+from backend.conversations.store import Message
+from backend.decks.access import DeckAccess, OpenDecks
 from backend.llm.providers import AllProvidersFailedError
 from backend.quota.admission import MessageQuota, QuotaSettings
+from backend.quota.store import UsageStore
 from backend.retrieval.repository import SearchHit
-from tests.api.accounts import unused_account_deletion
+from backend.turns import DeckSection, MentionedCard, MentionedDeck, Turn
+from tests.api.app_factory import make_app
 from tests.api.coaches import FakeCoach
-from tests.api.tokens import fake_verifier, mint
+from tests.api.tokens import mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import InMemoryDeckStore, no_decks
 from tests.quota.fake_clock import FakeClock
-from tests.quota.memory_usage import memory_quota
+from tests.quota.memory_usage import InMemoryUsageStore, memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -95,20 +91,14 @@ def _client(
     quota: MessageQuota | None = None,
 ) -> TestClient:
     @contextmanager
-    def open_store() -> Generator[ConversationStore]:
-        yield store
-
-    @contextmanager
     def open_cards() -> Generator[CardCatalog]:
         yield cards if cards is not None else InMemoryCardCatalog([])
 
     return TestClient(
-        create_app(
-            fake_verifier(),
-            open_store,
+        make_app(
+            store=store,
             open_decks=open_decks,
             coach=coach,
-            delete_account=unused_account_deletion,
             open_cards=open_cards,
             limits=limits,
             quota=quota,
@@ -234,7 +224,7 @@ class _UnreachableCatalog:
     def find(self, name: str) -> Card | None:
         raise ConnectionError("cards table unreachable")
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+    def find_by_id(self, oracle_id: str) -> Card | None:
         raise ConnectionError("cards table unreachable")
 
     def all_names(self) -> list[str]:
@@ -272,20 +262,43 @@ def test_both_messages_are_stored_and_the_answer_keeps_its_announced_id_and_trac
 
 
 def test_the_coach_gets_the_question_and_the_capped_history_before_it() -> None:
-    store = InMemoryConversationStore(Limits(max_history_messages=2))
+    store = InMemoryConversationStore(Limits(max_history_messages=3))
     conversation = store.create(ALICE, None)
-    earlier: list[Turn] = [("user", "q1"), ("assistant", "a1"), ("user", "q2")]
+    earlier: list[Turn] = [("user", "q1"), ("assistant", "a1"), ("user", "q2"), ("assistant", "a2")]
     for role, content in earlier:
         store.add_message(ALICE, conversation.id, role, content)
-    coach = FakeCoach([Started(None)], Reply("a2", "answered", ()))
+    coach = FakeCoach([Started(None)], Reply("a3", "answered", ()))
 
     _ask(store, coach, "q3", conversation_id=conversation.id)
 
     [question] = coach.questions
     assert question.text == "q3"
-    assert question.history == (("assistant", "a1"), ("user", "q2"))
+    assert question.history == (("assistant", "a1"), ("user", "q2"), ("assistant", "a2"))
     assert question.user_id == ALICE
     assert question.conversation_id == conversation.id
+
+
+def test_questions_whose_run_failed_stay_stored_but_are_left_out_of_the_history(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    earlier: list[Turn] = [
+        ("user", "failed once"),
+        ("user", "q2"),
+        ("assistant", "a2"),
+        ("user", "failed again"),
+    ]
+    for role, content in earlier:
+        store.add_message(ALICE, conversation.id, role, content)
+    coach = FakeCoach([Started(None)], Reply("a3", "answered", ()))
+
+    _ask(store, coach, "q3", conversation_id=conversation.id)
+
+    [question] = coach.questions
+    assert question.history == (("user", "q2"), ("assistant", "a2"))
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None
+    assert [m.content for m in detail.messages][:4] == [content for _, content in earlier]
 
 
 def test_provider_exhaustion_ends_the_stream_with_a_typed_error_event(
@@ -352,7 +365,10 @@ def test_a_message_over_the_cap_is_a_plain_422_before_any_stream_opens() -> None
     response = _post(store, coach, conversation.id, {"content": "x" * 11}, _as(ALICE))
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Message is 11 characters; the limit is 10."}
+    assert response.json() == {
+        "detail": "Message is 11 characters; the limit is 10.",
+        "code": "message_too_long",
+    }
     assert coach.questions == []
 
 
@@ -522,12 +538,13 @@ def _mention(
     user: uuid.UUID = ALICE,
     conversation_id: uuid.UUID | None = None,
     limits: Limits | None = None,
+    content: str = "Does she ready runes?",
 ):
     if conversation_id is None:
         conversation_id = store.create(ALICE, None).id
     return _client(store, coach, open_decks=library.open, limits=limits, cards=library.cards).post(
         f"/conversations/{conversation_id}/messages",
-        json={"content": "Does she ready runes?", "mentions": mentions},
+        json={"content": content, "mentions": mentions},
         headers=_as(user),
     )
 
@@ -552,7 +569,10 @@ def test_mentioned_cards_and_decks_reach_the_coach_resolved(
     assert "ready up to 4 friendly runes" in card.text
     assert mentioned_deck == MentionedDeck(
         name="Sona ramp",
-        sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher",))),
+        sections=(
+            DeckSection("Champion", ("Sona, Harmonious",)),
+            DeckSection("MainDeck", ("Blazing Scorcher",)),
+        ),
     )
 
 
@@ -598,7 +618,7 @@ def test_an_unknown_mention_is_a_plain_422_and_nothing_is_stored_or_run(
     )
 
     assert response.status_code == 422
-    assert response.json() == {"detail": f"No {kind} with id {unknown}."}
+    assert response.json() == {"detail": f"No {kind} with id {unknown}.", "code": f"unknown_{kind}"}
     assert coach.questions == []
     detail = store.get(ALICE, conversation.id)
     assert detail is not None and detail.messages == ()
@@ -613,7 +633,7 @@ def test_someone_elses_deck_is_refused_like_a_missing_one(
     response = _mention(store, coach, library, [{"kind": "deck", "id": str(bobs.id)}])
 
     assert response.status_code == 422
-    assert response.json() == {"detail": f"No deck with id {bobs.id}."}
+    assert response.json() == {"detail": f"No deck with id {bobs.id}.", "code": "unknown_deck"}
     assert coach.questions == []
 
 
@@ -651,7 +671,10 @@ def test_more_mentions_than_the_cap_is_a_plain_422(
     )
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Message has 3 mentions; the limit is 2."}
+    assert response.json() == {
+        "detail": "Message has 3 mentions; the limit is 2.",
+        "code": "too_many_mentions",
+    }
     assert coach.questions == []
     detail = store.get(ALICE, conversation.id)
     assert detail is not None and detail.messages == ()
@@ -671,19 +694,184 @@ def test_a_malformed_mention_is_refused(
     assert coach.questions == []
 
 
-def test_a_turn_after_a_mentioning_one_sees_its_text_but_not_its_mentions(
+def _turn(
+    store: InMemoryConversationStore,
+    library: Library,
+    conversation_id: uuid.UUID,
+    mentions: list[dict[str, str]],
+    content: str = "Does she ready runes?",
+) -> Question:
+    """Send one message that gets answered; the question the coach was asked."""
+    coach = FakeCoach([Started(None)], Reply("Yes.", "answered", ()))
+    response = _mention(
+        store, coach, library, mentions, conversation_id=conversation_id, content=content
+    )
+    assert parse_sse(response.text)[-1].event == "final", response.text
+    [question] = coach.questions
+    return question
+
+
+def test_later_turns_see_earlier_mentions_again_after_their_own_and_each_once(
     store: InMemoryConversationStore, library: Library
 ) -> None:
+    conversation = store.create(ALICE, None).id
+    deck = library.decks.create(ALICE, "Sona ramp", SONA_DECK)
+    sona = {"kind": "card", "id": SONA_ID}
+
+    _turn(store, library, conversation, [sona])
+    second = _turn(store, library, conversation, [{"kind": "deck", "id": str(deck.id)}])
+    third = _turn(store, library, conversation, [sona], "And Sona again?")
+
+    assert [m.name for m in second.mentions] == ["Sona ramp", "Sona, Harmonious"]
+    assert [m.name for m in third.mentions] == ["Sona, Harmonious", "Sona ramp"]
+    assert third.history[0] == ("user", "Does she ready runes?")  # the text is there too
+
+
+def test_only_mentions_in_the_history_window_come_back(library: Library) -> None:
+    store = InMemoryConversationStore(Limits(max_history_messages=2))
+    conversation = store.create(ALICE, None).id
+
+    _turn(store, library, conversation, [{"kind": "card", "id": SONA_ID}])
+    _turn(store, library, conversation, [])
+    third = _turn(store, library, conversation, [])
+
+    assert third.mentions == ()
+
+
+def test_an_earlier_mention_that_no_longer_resolves_is_skipped_silently(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None).id
+    deck = library.decks.create(ALICE, "Sona ramp", SONA_DECK)
+    _turn(store, library, conversation, [{"kind": "deck", "id": str(deck.id)}])
+    library.decks.delete(ALICE, deck.id)
+
+    later = _turn(store, library, conversation, [])
+
+    assert later.mentions == ()
+
+
+def test_a_reloaded_conversation_shows_what_each_message_mentioned(
+    store: InMemoryConversationStore, library: Library
+) -> None:
+    conversation = store.create(ALICE, None).id
+    _turn(store, library, conversation, [{"kind": "card", "id": SONA_ID}])
+    client = _client(store, FakeCoach(), open_decks=library.open)
+
+    detail = client.get(f"/conversations/{conversation}", headers=_as(ALICE)).json()
+
+    assert [m["mentions"] for m in detail["messages"]] == [[{"kind": "card", "id": SONA_ID}], []]
+
+
+def test_a_failure_while_building_final_ends_in_error_stores_nothing_and_refunds(
+    store: InMemoryConversationStore,
+) -> None:
     conversation = store.create(ALICE, None)
-    first = FakeCoach([Started(None)], Reply("Yes.", "answered", ()))
-    _mention(
-        store, first, library, [{"kind": "card", "id": SONA_ID}], conversation_id=conversation.id
+    quota = _quota(per_minute=1, per_day=1)
+    unbuildable = Reply("a", cast(Outcome, "shrugged"), ())  # FinalData refuses the outcome
+    events = parse_sse(
+        _send(store, FakeCoach([Started(None)], unbuildable), quota, conversation.id).text
     )
-    second = FakeCoach([Started(None)], Reply("Still yes.", "answered", ()))
 
-    events = _ask(store, second, "And on her first turn?", conversation_id=conversation.id)
+    assert [e.event for e in events] == ["start", "error"]
+    assert events[-1].data["code"] == "internal"
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None and [m.role for m in detail.messages] == ["user"]
+    again = store.create(ALICE, None)
+    assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
 
-    assert events[-1].event == "final"
-    [question] = second.questions
-    assert question.history == (("user", "Does she ready runes?"), ("assistant", "Yes."))
-    assert question.mentions == ()
+
+class _UnrefundableUsage(InMemoryUsageStore):
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        raise ConnectionError("usage table unreachable")
+
+
+class _DeletedBeforeInsert(InMemoryConversationStore):
+    """The conversation is deleted between reading its history and storing the message."""
+
+    def add_message(self, *args: Any, **kwargs: Any) -> Message | None:
+        return None
+
+
+def test_a_failing_refund_never_replaces_the_original_refusal() -> None:
+    store = _DeletedBeforeInsert(Limits())
+    conversation = store.create(ALICE, None)
+    usage = _UnrefundableUsage()
+
+    @contextmanager
+    def open_usage() -> Generator[UsageStore]:
+        yield usage
+
+    quota = MessageQuota(QuotaSettings(), open_usage, FakeClock(EVENING))
+
+    response = _send(store, FakeCoach([Started(None)], ANSWERED), quota, conversation.id)
+
+    assert response.status_code == 404
+
+
+def _post_and_drop_before_the_stream_opens(
+    app: Any, conversation_id: uuid.UUID, content: str
+) -> None:
+    """POST a message straight to the ASGI app, as a client that is gone before the
+    response starts (the server's first send fails, as on a closed socket)."""
+    body = json.dumps({"content": content}).encode()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": f"/conversations/{conversation_id}/messages",
+        "raw_path": f"/conversations/{conversation_id}/messages".encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"content-type", b"application/json"),
+            (b"authorization", f"Bearer {mint(ALICE)}".encode()),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            raise OSError("connection reset by peer")
+
+    async def call() -> None:
+        with contextlib.suppress(Exception):
+            await app(scope, receive, send)
+
+    asyncio.run(call())
+
+
+def test_a_client_gone_before_the_stream_opens_gets_its_slot_back(
+    store: InMemoryConversationStore,
+) -> None:
+    conversation = store.create(ALICE, None)
+    quota = _quota(per_minute=1, per_day=1)
+    coach = FakeCoach([Started(None)], ANSWERED)
+    app = make_app(store=store, coach=coach, quota=quota)
+
+    _post_and_drop_before_the_stream_opens(app, conversation.id, "Anyone there?")
+
+    assert coach.questions == []  # the run never started
+    detail = store.get(ALICE, conversation.id)
+    assert detail is not None and [m.content for m in detail.messages] == ["Anyone there?"]
+    again = store.create(ALICE, None)
+    assert _send(store, FakeCoach([Started(None)], ANSWERED), quota, again.id).status_code == 200
+
+
+def test_a_discarded_reply_streams_a_reset_and_only_the_text_after_it_is_the_answer(
+    store: InMemoryConversationStore,
+) -> None:
+    run = [Started(None), Step("answer"), Token("Yes, you "), Reset(), Token("No.")]
+
+    events = _ask(store, FakeCoach(run, Reply("No.", "answered", ())))
+
+    assert [e.event for e in events] == ["start", "status", "token", "reset", "token", "final"]
+    assert events[3].data == {}
+    assert events[-1].data["text"] == "No."

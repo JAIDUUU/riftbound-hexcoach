@@ -1,9 +1,15 @@
+import threading
+import time
 import uuid
-from datetime import UTC, datetime, timedelta, timezone
+from collections import deque
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
 from backend.config import InvalidConfigError
+from backend.quota import admission
 from backend.quota.admission import (
     DEFAULT_MESSAGES_PER_DAY,
     DEFAULT_MESSAGES_PER_MINUTE,
@@ -12,8 +18,9 @@ from backend.quota.admission import (
     QuotaSettings,
     quota_settings_from_env,
 )
+from backend.quota.store import UsageStore
 from tests.quota.fake_clock import FakeClock
-from tests.quota.memory_usage import memory_quota
+from tests.quota.memory_usage import InMemoryUsageStore, memory_quota
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -107,6 +114,45 @@ def test_a_throttled_message_does_not_count_against_the_day() -> None:
     assert _refusal(quota).code == "daily_quota_reached"
 
 
+class _DequeThatYields(deque[datetime]):
+    """Hands the GIL to another thread right after its length is read, which widens the
+    gap between counting the minute's slots and taking one far enough for threads to hit."""
+
+    def __len__(self) -> int:
+        length = super().__len__()
+        time.sleep(0.001)
+        return length
+
+
+def test_messages_sent_at_once_never_take_more_than_the_minutes_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(admission, "deque", _DequeThatYields)
+    senders, per_minute = 8, 3
+    quota = _quota(
+        QuotaSettings(messages_per_minute=per_minute, messages_per_day=1000), FakeClock(EVENING)
+    )
+    together = threading.Barrier(senders)
+    sent: list[bool] = []
+
+    def send() -> None:
+        together.wait()
+        try:
+            quota.reserve(ALICE)
+        except QuotaExceededError:
+            sent.append(False)
+        else:
+            sent.append(True)
+
+    threads = [threading.Thread(target=send) for _ in range(senders)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sent.count(True) == per_minute
+
+
 def test_limits_must_be_positive() -> None:
     with pytest.raises(ValueError, match="positive"):
         QuotaSettings(messages_per_day=0)
@@ -176,3 +222,39 @@ def test_a_message_the_daily_quota_refuses_takes_no_minute_slot() -> None:
     quota.refund(first)
 
     quota.reserve(ALICE)  # the refused attempt left the minute free
+
+
+class _FlakyUsage(InMemoryUsageStore):
+    """Its first release fails, as a dropped database connection would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_left = 1
+
+    def release(self, user_id: uuid.UUID, day: date) -> None:
+        if self.failures_left:
+            self.failures_left -= 1
+            raise ConnectionError("usage table unreachable")
+        super().release(user_id, day)
+
+
+def test_a_refund_that_fails_can_be_retried_and_is_logged_with_what_to_fix(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage = _FlakyUsage()
+
+    @contextmanager
+    def open_usage() -> Generator[UsageStore]:
+        yield usage
+
+    quota = MessageQuota(QuotaSettings(messages_per_day=1), open_usage, FakeClock(EVENING))
+    reservation = quota.reserve(ALICE)
+
+    with pytest.raises(ConnectionError):
+        quota.refund(reservation)
+
+    assert str(ALICE) in caplog.text and "2026-11-17" in caplog.text
+    assert not reservation.refunded
+    quota.refund(reservation)
+    assert reservation.refunded
+    quota.reserve(ALICE)  # the day's one slot is free again

@@ -200,8 +200,9 @@ def format_hit(hit: "SearchHit") -> str:
 
 
 def _search(args: argparse.Namespace) -> int:
+    from backend.agent.coach import hybrid_retriever
     from backend.db import make_engine
-    from backend.retrieval.repository import hybrid_search_chunks, search_chunks
+    from backend.retrieval.repository import search_chunks
 
     query = " ".join(args.query)
     engine = make_engine()
@@ -209,11 +210,7 @@ def _search(args: argparse.Namespace) -> int:
         if args.keyword_only:
             hits = search_chunks(connection, query, limit=args.limit)
         else:
-            from backend.retrieval.embedding import embedder
-
-            hits = hybrid_search_chunks(
-                connection, query, embedder().embed_query(query), limit=args.limit
-            )
+            hits = hybrid_retriever(connection, args.limit)(query)
     engine.dispose()
     if not hits:
         print("No matching chunks.")
@@ -235,12 +232,11 @@ def _check_golden(_: argparse.Namespace) -> int:
 
 
 def _eval_retrieval(args: argparse.Namespace) -> int:
+    from backend.agent.coach import hybrid_retriever
     from backend.db import make_engine
     from backend.evals.golden import load_golden_set
     from backend.evals.langfuse_run import langfuse_client, run_experiment, upload_golden_set
     from backend.evals.retrieval_eval import aggregate_hit_rate
-    from backend.retrieval.embedding import embedder
-    from backend.retrieval.repository import hybrid_search_chunks
 
     items = load_golden_set(GOLDEN_SET_PATH)
     client = langfuse_client()
@@ -249,12 +245,10 @@ def _eval_retrieval(args: argparse.Namespace) -> int:
 
     engine = make_engine()
     with engine.connect() as connection:
+        search = hybrid_retriever(connection, args.limit)
 
         def retrieve(question: str) -> list[str]:
-            hits = hybrid_search_chunks(
-                connection, question, embedder().embed_query(question), limit=args.limit
-            )
-            return [hit.rule_id for hit in hits if hit.rule_id is not None]
+            return [hit.rule_id for hit in search(question) if hit.rule_id is not None]
 
         results = run_experiment(client, items, retrieve, args.run_name)
     engine.dispose()
@@ -291,12 +285,10 @@ def _ping(args: argparse.Namespace) -> int:
 
 
 def _ask(args: argparse.Namespace) -> int:
-    from backend.agent.coach import card_lookup_tool
-    from backend.agent.tracing import traced_run, tracing_enabled
+    from backend.agent.coach import run_on_database
+    from backend.agent.tracing import tracing_enabled
     from backend.db import make_engine
     from backend.llm.providers import chat_chain
-    from backend.retrieval.embedding import embedder
-    from backend.retrieval.repository import SearchHit, hybrid_search_chunks
 
     chain = chat_chain()
     for provider in chain.skipped:
@@ -305,16 +297,7 @@ def _ask(args: argparse.Namespace) -> int:
         print("note: LANGFUSE keys not set, this run will not be traced")
 
     engine = make_engine()
-    with engine.connect() as connection:
-
-        def retrieve(query: str) -> list[SearchHit]:
-            return hybrid_search_chunks(
-                connection, query, embedder().embed_query(query), limit=args.limit
-            )
-
-        state, trace_id = traced_run(
-            chain, retrieve, " ".join(args.question), tools=[card_lookup_tool(connection)]
-        )
+    state, trace_id = run_on_database(engine, chain, " ".join(args.question), limit=args.limit)
     engine.dispose()
 
     print(state["answer"])
@@ -326,7 +309,7 @@ def _ask(args: argparse.Namespace) -> int:
 
 
 def _eval_agent(args: argparse.Namespace) -> int:
-    from backend.agent.coach import card_lookup_tool
+    from backend.agent.coach import card_lookup_tool, hybrid_retriever
     from backend.agent.graph import Outcome
     from backend.agent.tracing import run_in_open_trace
     from backend.db import make_engine
@@ -337,8 +320,6 @@ def _eval_agent(args: argparse.Namespace) -> int:
     from backend.evals.golden import load_golden_set
     from backend.evals.langfuse_run import langfuse_client, run_agent_experiment, upload_golden_set
     from backend.llm.providers import chat_chain
-    from backend.retrieval.embedding import embedder
-    from backend.retrieval.repository import SearchHit, hybrid_search_chunks
 
     items = load_golden_set(GOLDEN_SET_PATH)
     client = langfuse_client()
@@ -347,12 +328,7 @@ def _eval_agent(args: argparse.Namespace) -> int:
 
     engine = make_engine()
     with engine.connect() as connection:
-
-        def retrieve(query: str) -> list[SearchHit]:
-            return hybrid_search_chunks(
-                connection, query, embedder().embed_query(query), limit=args.limit
-            )
-
+        retrieve = hybrid_retriever(connection, args.limit)
         lookup = card_lookup_tool(connection)
 
         def ask(question: str) -> tuple[str, Outcome]:

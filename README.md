@@ -95,16 +95,17 @@ read [`docs/deployment.md`](docs/deployment.md).
 | --- | --- |
 | `POST /conversations` | Create a conversation (optional `title`, up to 200 characters). |
 | `GET /conversations` | List your conversations, most recently active first. |
-| `GET /conversations/{id}` | One conversation with its messages, oldest first, each with its trace id and your feedback. |
+| `GET /conversations/{id}` | One conversation with its messages, oldest first, each with its trace id, your feedback, the cards and decks a question @-mentioned, and the validated cards an answer tags (for its previews). |
 | `DELETE /conversations/{id}` | Delete a conversation and its messages. |
-| `POST /conversations/{id}/messages` | Send a message (`{"content": "..."}`) and stream the answer back as server-sent events: `start` (the answer's message id and trace id), `status` (each graph step), `token`, then `final` (the full text, outcome and citations) or `error`. Events and a curl example are in [`backend/README.md`](backend/README.md#sending-a-message-sse); see also [ADR 0005](docs/adr/0005-sse-streaming-and-final-event.md). |
-| `PUT /conversations/{id}/messages/{message_id}/feedback` | Give or change your thumbs up or down (`{"rating": "up"}` or `"down"`) on an answer. It is saved with the message and recorded as a Langfuse score on the answer's trace. |
+| `POST /conversations/{id}/messages` | Send a message (`{"content": "..."}`) and stream the answer back as server-sent events: `start` (the answer's message id and trace id), `status` (each graph step), `token`, `reset` (discard the text streamed so far: the model started over), then `final` (the full text, outcome, citations and validated cards) or `error`. Events and a curl example are in [`backend/README.md`](backend/README.md#sending-a-message-sse); see also [ADR 0005](docs/adr/0005-sse-streaming-and-final-event.md). |
+| `PUT /conversations/{id}/messages/{message_id}/feedback` | Give or change your thumbs up or down (`{"rating": "up"}` or `"down"`) on an answer. It is saved with the message and, when the answer was traced, recorded as a Langfuse score on its trace. |
 
 ### Decks
 
 A decklist is sectioned plain text: `Legend:`, `Champion:`, `MainDeck:`, `Battlefields:`,
-`Runes:` and `Sideboard:` headers, each followed by lines like `3 Consult the Past`. It is
-parsed in code, never by the LLM. Import validation resolves every line to a card,
+`Runes:` and `Sideboard:` headers, each followed by lines like `3 Consult the Past`. Headers
+may also be singular, spaced, or carry a count (`Main Deck (40):`). It is parsed in code,
+never by the LLM. Import validation resolves every line to a card,
 suggests fixes for unknown names, and warns about section sizes and copy limits. Warnings
 never stop a deck from being saved. The deck-construction numbers are unverified
 placeholders until they are checked against the official rules.
@@ -112,7 +113,7 @@ placeholders until they are checked against the official rules.
 | Method and path | What it does |
 | --- | --- |
 | `POST /decks/preview` | Validate a `decklist` without saving it. |
-| `POST /decks` | Save a deck (`name`, up to 100 characters, and `decklist`); returns it with its validation. |
+| `POST /decks` | Save a deck (`name`, trimmed, 1 to 100 characters and not necessarily unique, and `decklist`); returns it with its validation. |
 | `GET /decks` | List your decks (id, name, timestamps), most recently updated first. |
 | `GET /decks/{id}` | One deck with its text and its validation against the current card data. |
 | `PUT /decks/{id}` | Replace a deck's name and text. |
@@ -122,10 +123,11 @@ placeholders until they are checked against the official rules.
 
 | Method and path | What it does |
 | --- | --- |
-| `DELETE /account` | Delete your account: your Supabase sign-in, conversations, messages, feedback and decks. It can't be undone; the app asks you to confirm first. |
+| `DELETE /account` | Delete your account: your Supabase sign-in, conversations, messages, feedback and decks. It can't be undone, and the API doesn't ask again, so the frontend is expected to confirm with the player before calling it. |
 
 Your current access token keeps working until it expires (Supabase access tokens are
-stateless), so the app signs you out right after.
+stateless, and the API doesn't revoke it). The frontend is expected to sign you out right
+after the call succeeds.
 
 ## Privacy
 

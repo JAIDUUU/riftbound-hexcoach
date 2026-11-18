@@ -65,8 +65,13 @@ def find_by_oracle_name(connection: Connection, name: str) -> Card | None:
     return _card_from_row(dict(row)) if row else None
 
 
-def find_by_oracle_id(connection: Connection, oracle_id: uuid.UUID) -> Card | None:
-    statement = select(cards_table).where(cards_table.c.oracle_id == oracle_id)
+def find_by_oracle_id(connection: Connection, oracle_id: str) -> Card | None:
+    """The card with this oracle id, or None (also for text that isn't a uuid)."""
+    try:
+        key = uuid.UUID(oracle_id)
+    except ValueError:
+        return None
+    statement = select(cards_table).where(cards_table.c.oracle_id == key)
     row = connection.execute(statement).mappings().first()
     return _card_from_row(dict(row)) if row else None
 

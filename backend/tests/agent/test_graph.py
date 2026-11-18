@@ -1,4 +1,7 @@
-from collections.abc import Iterator, Sequence
+import json
+import re
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -6,26 +9,30 @@ import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
+from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.tools.base import ArgsSchema
 from pydantic import BaseModel, Field
 
+from backend.agent.citations import cited_evidence
 from backend.agent.graph import (
     AgentEvent,
-    MentionedCard,
-    MentionedDeck,
+    Reset,
     Step,
     Token,
-    Turn,
+    evidence,
     format_evidence,
     run_agent,
 )
 from backend.agent.tools import make_lookup_card
+from backend.cards.collapse import Card
 from backend.llm.providers import AllProvidersFailedError, ProviderChain
 from backend.retrieval.repository import SearchHit
+from backend.turns import DeckSection, MentionedCard, MentionedDeck, Turn
+from tests.cards.memory_catalog import InMemoryCardCatalog
 
 
 class ScriptedLLM(Runnable[LanguageModelInput, BaseMessage]):
@@ -192,30 +199,33 @@ def test_message_history_reaches_the_prompts() -> None:
     assert "Rengar banish deck" in llm.prompts[-1]  # and so does the answerer
 
 
-SONA = MentionedCard(
-    name="Sona, Harmonious",
-    text=(
-        "Sona, Harmonious (Champion Unit)\n"
-        "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
-    ),
-)
 SONA_RAMP = MentionedDeck(
     name="Sona ramp",
-    sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher", "Recruit"))),
+    sections=(
+        DeckSection("Champion", ("Sona, Harmonious",)),
+        DeckSection("MainDeck", ("Blazing Scorcher", "Recruit"), ("Not A Real Card",)),
+        DeckSection("Sideboard", (), ("Mystery Card",)),
+    ),
 )
 
 
-def test_mentioned_cards_and_decks_reach_prepare_grade_and_answer_as_player_referenced() -> None:
+def test_mentioned_cards_and_decks_reach_prepare_grade_and_answer_as_player_referenced(
+    cards_by_name: dict[str, Card],
+) -> None:
     retriever = RecordingRetriever({})
     llm = ScriptedLLM([PREPARE, STRONG, "Yes: Sona readies up to 4 friendly runes."])
+    sona = MentionedCard(cards_by_name["Sona, Harmonious"])
 
-    run_agent(llm, retriever, "Does she ready runes?", mentions=[SONA, SONA_RAMP])
+    run_agent(llm, retriever, "Does she ready runes?", mentions=[sona, SONA_RAMP])
 
     for prompt in llm.prompts:  # prepare, grade, answer
         assert "explicitly referenced" in prompt
         assert "ready up to 4 friendly runes" in prompt
         assert "[Deck: Sona ramp]" in prompt
         assert "MainDeck: Blazing Scorcher; Recruit" in prompt
+        assert "MainDeck, unrecognised (as written): Not A Real Card" in prompt
+        assert "Sideboard:" not in prompt  # it holds no recognised card
+        assert "Sideboard, unrecognised (as written): Mystery Card" in prompt
 
 
 def test_the_answer_prompt_states_source_precedence() -> None:
@@ -228,13 +238,17 @@ def test_the_answer_prompt_states_source_precedence() -> None:
     assert "the newer one (by date) wins" in llm.prompts[-1]
 
 
-def test_the_answer_prompt_asks_for_cards_as_card_tags() -> None:
+def test_the_answer_and_the_abstention_both_ask_for_cards_as_card_tags() -> None:
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
-    llm = ScriptedLLM([PREPARE, STRONG, "answer"])
+    answering = ScriptedLLM([PREPARE, STRONG, "answer"])
+    abstaining = ScriptedLLM([PREPARE, '{"grade": "weak", "rewritten_query": null}', "Which?"])
 
-    run_agent(llm, retriever, "Can I?")
+    answered = run_agent(answering, retriever, "Can I?")
+    abstained = run_agent(abstaining, retriever, "Can I?")
 
-    assert "[[Card Name]]" in llm.prompts[-1]
+    assert (answered["outcome"], abstained["outcome"]) == ("answered", "abstained")
+    assert "[[Card Name]]" in answering.prompts[-1]
+    assert "[[Card Name]]" in abstaining.prompts[-1]
 
 
 def test_evidence_is_formatted_by_precedence_and_cited_by_name() -> None:
@@ -269,26 +283,41 @@ def test_two_non_json_replies_are_a_clear_error() -> None:
         run_agent(llm, retriever, "Can I?")
 
 
-def _zhonyas_lookup(lookups: list[str]):
-    def find_card(name: str) -> str | None:
-        lookups.append(name)
-        if name.lower() == "zhonya's hourglass":
-            return "Zhonya's Hourglass (Gear)\nExhaust: a unit you control gains Deflect."
-        return None
+class RecordingCatalog(InMemoryCardCatalog):
+    """A catalog that records every name looked up in it."""
 
-    return make_lookup_card(find_card, lambda: ["Zhonya's Hourglass"])
+    def __init__(self, cards: Iterable[Card]) -> None:
+        super().__init__(cards)
+        self.lookups: list[str] = []
+
+    def find(self, name: str) -> Card | None:
+        self.lookups.append(name)
+        return super().find(name)
+
+
+@pytest.fixture
+def zhonyas(cards_by_name: dict[str, Card]) -> RecordingCatalog:
+    """A catalog holding one Gear, Zhonya's Hourglass."""
+    hourglass = replace(
+        cards_by_name["Pouty Poro"],
+        oracle_id="0e5a8a8c-5b7c-4a4e-9b56-2d3c4b5a6f70",
+        oracle_name="Zhonya's Hourglass",
+        card_type="Gear",
+        supertype=None,
+        cleaned_text="Exhaust: a unit you control gains Deflect.",
+    )
+    return RecordingCatalog([hourglass])
 
 
 def _tool_call(name: str, args: dict[str, Any], call_id: str = "call-1") -> AIMessage:
     return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])
 
 
-def test_the_answerer_can_look_a_card_up_and_use_its_text() -> None:
+def test_the_answerer_can_look_a_card_up_and_use_its_text(zhonyas: RecordingCatalog) -> None:
     retriever = RecordingRetriever(
         {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
     )
-    lookups: list[str] = []
-    tool = _zhonyas_lookup(lookups)
+    tool = make_lookup_card(zhonyas)
     llm = ScriptedLLM(
         [
             PREPARE,
@@ -300,7 +329,7 @@ def test_the_answerer_can_look_a_card_up_and_use_its_text() -> None:
 
     state = run_agent(llm, retriever, "Does Zhonya's stop the score?", tools=[tool])
 
-    assert lookups == ["Zhonya's Hourglass"]  # the tool hit the store, not model memory
+    assert zhonyas.lookups == ["Zhonya's Hourglass"]  # the tool hit the store, not memory
     assert llm.bound_tools == [tool]
     assert state["outcome"] == "answered"
     assert "Deflect" in state["answer"]
@@ -310,23 +339,26 @@ def test_the_answerer_can_look_a_card_up_and_use_its_text() -> None:
     assert "lookup_card" in llm.prompts[-2]
 
 
-def test_a_model_stuck_in_lookups_is_forced_to_answer_at_the_cap() -> None:
+def test_a_model_stuck_in_lookups_is_forced_to_answer_at_the_cap(
+    zhonyas: RecordingCatalog,
+) -> None:
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
-    lookups: list[str] = []
-    tool = _zhonyas_lookup(lookups)
+    tool = make_lookup_card(zhonyas)
     stuck = [_tool_call("lookup_card", {"name": "Zhonya's Hourglass"}, f"call-{n}") for n in "123"]
     llm = ScriptedLLM([PREPARE, STRONG, *stuck, "Fine: no, it only grants Deflect."])
 
     state = run_agent(llm, retriever, "Does Zhonya's stop it?", tools=[tool])
 
-    assert len(lookups) == 3  # one per round, then the cap
+    assert len(zhonyas.lookups) == 3  # one per round, then the cap
     assert state["answer"] == "Fine: no, it only grants Deflect."
     assert "information you already have" in llm.prompts[-1]  # the forced-answer nudge
 
 
-def test_a_hallucinated_tool_name_gets_a_corrective_tool_message() -> None:
+def test_a_hallucinated_tool_name_gets_a_corrective_tool_message(
+    zhonyas: RecordingCatalog,
+) -> None:
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
-    tool = _zhonyas_lookup([])
+    tool = make_lookup_card(zhonyas)
     llm = ScriptedLLM(
         [
             PREPARE,
@@ -362,14 +394,14 @@ class _RecordingCallbacks(BaseCallbackHandler):
         self.tool_starts.append(serialized.get("name", "?"))
 
 
-def test_tool_calls_reach_the_callbacks_passed_to_run_agent() -> None:
+def test_tool_calls_reach_the_callbacks_passed_to_run_agent(zhonyas: RecordingCatalog) -> None:
     # End to end: the handler given to run_agent (Langfuse, in production) sees the
     # tool run. This alone can't tell explicit config passing from langchain-core's
     # contextvar fallback; the next test pins the explicit hand-off.
     retriever = RecordingRetriever(
         {"score battlefield twice per turn": [rule_hit("472", "Once per turn.")]}
     )
-    tool = _zhonyas_lookup([])
+    tool = make_lookup_card(zhonyas)
     llm = ScriptedLLM(
         [PREPARE, STRONG, _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}), "No."]
     )
@@ -478,15 +510,165 @@ def test_provider_exhaustion_surfaces_from_a_streamed_run_as_is() -> None:
         run_agent(chain, RecordingRetriever({}), "Can I?", on_event=lambda event: None)
 
 
-def test_with_tools_the_grader_is_told_card_text_is_fixable() -> None:
+def test_with_tools_the_grader_is_told_card_text_is_fixable(zhonyas: RecordingCatalog) -> None:
     # Otherwise the grader marks card-text gaps weak and the run abstains before the
     # answer step - the only place the tool exists - ever gets a chance to use it.
     retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
     with_tools = ScriptedLLM([PREPARE, STRONG, "answer"])
     without_tools = ScriptedLLM([PREPARE, STRONG, "answer"])
 
-    run_agent(with_tools, retriever, "Can I?", tools=[_zhonyas_lookup([])])
+    run_agent(with_tools, retriever, "Can I?", tools=[make_lookup_card(zhonyas)])
     run_agent(without_tools, retriever, "Can I?")
 
     assert "NOT a reason to grade weak" in with_tools.prompts[1]  # the grade call
     assert "NOT a reason to grade weak" not in without_tools.prompts[1]
+
+
+def _spans(events: Sequence[AgentEvent]) -> list[str]:
+    """The streamed text between resets: what the client shows, then discards."""
+    spans = [""]
+    for event in events:
+        if isinstance(event, Reset):
+            spans.append("")
+        elif isinstance(event, Token):
+            spans[-1] += event.text
+    return spans
+
+
+def test_a_reply_cut_off_by_a_provider_failure_is_reset_before_the_next_provider_streams() -> None:
+    class DropsMidAnswer(GenericFakeChatModel):
+        streams: int = 0
+
+        def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
+            self.streams += 1
+            for i, chunk in enumerate(super()._stream(*args, **kwargs)):
+                if self.streams == 3 and i == 2:  # the answer, two words in
+                    raise ConnectionError("connection dropped")
+                yield chunk
+
+    retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
+    dropped = "Yes, you can score twice."
+    chain = ProviderChain(
+        [
+            ("a", DropsMidAnswer(messages=iter([PREPARE, STRONG, dropped]))),
+            ("b", GenericFakeChatModel(messages=iter(["No - only once per turn."]))),
+        ]
+    )
+    events: list[AgentEvent] = []
+
+    state = run_agent(chain, retriever, "Can I score twice?", on_event=events.append)
+
+    cut_off, answer = _spans(events)
+    assert cut_off and dropped.startswith(cut_off)
+    assert answer == state["answer"] == "No - only once per turn."
+
+
+class _StreamingToolModel(GenericFakeChatModel):
+    """Streams its replies word by word, tool calls included, and can be bound to tools."""
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Any:
+        return self
+
+    def _stream(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Iterator[ChatGenerationChunk]:
+        reply = next(self.messages)
+        message = AIMessage(reply) if isinstance(reply, str) else reply
+        for word in re.split(r"(\s)", message.text):
+            chunk = ChatGenerationChunk(message=AIMessageChunk(content=word))
+            if run_manager is not None:
+                run_manager.on_llm_new_token(word, chunk=chunk)
+            yield chunk
+        if message.tool_calls:
+            calls = [
+                tool_call_chunk(name=c["name"], args=json.dumps(c["args"]), id=c["id"], index=i)
+                for i, c in enumerate(message.tool_calls)
+            ]
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=calls))
+
+
+def test_text_written_before_a_tool_call_is_reset_once_the_call_is_made(
+    zhonyas: RecordingCatalog,
+) -> None:
+    retriever = RecordingRetriever({"score battlefield twice per turn": [rule_hit("472", "x")]})
+    looking = AIMessage(
+        "Let me check Zhonya's Hourglass.",
+        tool_calls=[{"name": "lookup_card", "args": {"name": "Zhonya's Hourglass"}, "id": "c1"}],
+    )
+    silent = _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}, "c2")
+    model = _StreamingToolModel(
+        messages=iter([PREPARE, STRONG, looking, silent, "No, it only grants Deflect."])
+    )
+    events: list[AgentEvent] = []
+
+    state = run_agent(
+        ProviderChain([("fake", model)]),
+        retriever,
+        "Does Zhonya's stop the score?",
+        tools=[make_lookup_card(zhonyas)],
+        on_event=events.append,
+    )
+
+    assert zhonyas.lookups == ["Zhonya's Hourglass", "Zhonya's Hourglass"]
+    # The silent second round streamed nothing, so it has nothing to reset.
+    assert _spans(events) == ["Let me check Zhonya's Hourglass.", state["answer"]]
+    assert state["answer"] == "No, it only grants Deflect."
+
+
+def card_hit(title: str, text: str) -> SearchHit:
+    return SearchHit(
+        chunk_id=11,
+        source_type="card_text",
+        rule_id=None,
+        section=None,
+        text=text,
+        source_version="2026-11-06",
+        source_date=date(2026, 11, 6),
+        title=title,
+        source_url=None,
+    )
+
+
+def test_a_looked_up_card_is_evidence_the_answer_can_cite(zhonyas: RecordingCatalog) -> None:
+    llm = ScriptedLLM(
+        [
+            PREPARE,
+            STRONG,
+            _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}),
+            _tool_call("lookup_card", {"name": "Zhonyas Hourglas"}, "call-2"),  # not found
+            "No: [[Zhonya's Hourglass]] only grants Deflect.",
+        ]
+    )
+
+    state = run_agent(
+        llm, RecordingRetriever({}), "Does it stop it?", tools=[make_lookup_card(zhonyas)]
+    )
+
+    [cited] = cited_evidence(state["answer"], evidence(state))
+    assert (cited.source_type, cited.title) == ("card_text", "Zhonya's Hourglass")
+    assert cited.text == "Zhonya's Hourglass (Gear)\nExhaust: a unit you control gains Deflect."
+    assert cited.source_date == date(2026, 11, 6)  # the card snapshot's date
+
+
+def test_a_mentioned_card_is_evidence_the_answer_can_cite(cards_by_name: dict[str, Card]) -> None:
+    sona = MentionedCard(cards_by_name["Sona, Harmonious"])
+    llm = ScriptedLLM([PREPARE, STRONG, "Yes: [[Sona, Harmonious]] readies up to 4 runes."])
+
+    state = run_agent(llm, RecordingRetriever({}), "Does she ready runes?", mentions=[sona])
+
+    [cited] = cited_evidence(state["answer"], evidence(state))
+    assert (cited.source_type, cited.title, cited.text) == ("card_text", sona.name, sona.text)
+
+
+def test_a_card_retrieved_and_also_looked_up_is_one_piece_of_evidence(
+    zhonyas: RecordingCatalog,
+) -> None:
+    retrieved = card_hit("Zhonya's Hourglass", "Zhonya's Hourglass (Gear)\n...")
+    retriever = RecordingRetriever({"score battlefield twice per turn": [retrieved]})
+    llm = ScriptedLLM(
+        [PREPARE, STRONG, _tool_call("lookup_card", {"name": "Zhonya's Hourglass"}), "No."]
+    )
+
+    state = run_agent(llm, retriever, "Does it stop it?", tools=[make_lookup_card(zhonyas)])
+
+    assert evidence(state) == (retrieved,)

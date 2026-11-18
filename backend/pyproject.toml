@@ -55,8 +55,12 @@ testpaths = ["tests"]
 pythonpath = ["src", "."]  # "." so tests can share fakes (tests.conversations.memory_store)
 # Integration tests touch the database behind DATABASE_URL, so they never run by accident:
 # they must be asked for with `pytest -m integration` (and still skip without DATABASE_URL).
-addopts = '-m "not integration"'
-markers = ["integration: needs a real database (DATABASE_URL); deselected unless -m integration"]
+# The same goes for the manual Langfuse check (`pytest -m langfuse_live`).
+addopts = '-m "not integration and not langfuse_live"'
+markers = [
+    "integration: needs a real database (DATABASE_URL); deselected unless -m integration",
+    "langfuse_live: writes to the real Langfuse project (LANGFUSE_* keys); deselected unless -m langfuse_live",
+]
 
 [tool.pyright]
 include = ["src", "tests"]

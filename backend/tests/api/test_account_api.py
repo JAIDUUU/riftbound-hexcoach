@@ -1,25 +1,13 @@
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import create_app
-from backend.conversations.limits import Limits
-from backend.conversations.store import ConversationStore
 from tests.api.accounts import FakeAccounts
-from tests.api.coaches import unused_coach
-from tests.api.tokens import fake_verifier, mint
-from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
+from tests.api.app_factory import make_app
+from tests.api.tokens import mint
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
-
-
-@contextmanager
-def _open_store() -> Generator[ConversationStore]:
-    yield InMemoryConversationStore(Limits())
 
 
 @pytest.fixture
@@ -29,15 +17,7 @@ def accounts() -> FakeAccounts:
 
 @pytest.fixture
 def client(accounts: FakeAccounts) -> TestClient:
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            _open_store,
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=accounts.delete,
-        )
-    )
+    return TestClient(make_app(delete_account=accounts.delete))
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:

@@ -1,12 +1,12 @@
 """Resolving player-written card names to Cards, and suggesting fixes for the ones that miss.
 
-One matcher for every caller: decklist import and the `lookup_card` tool both resolve by
-oracle name or alias (`find_by_oracle_name`) and suggest from the same alias-aware pool
-(`all_card_names`), so a suggestion is always a name that would resolve if picked.
+One matcher for every caller: decklist import, the `lookup_card` tool, Card tags and @
+mentions all resolve through a CardCatalog, by oracle name or alias (`find`) or by oracle
+id (`find_by_id`), and suggest from the same alias-aware pool (`all_names`), so a
+suggestion is always a name that would resolve if picked.
 """
 
 import difflib
-import uuid
 from collections.abc import Iterable, Sequence
 from typing import Protocol
 
@@ -24,7 +24,7 @@ class CardCatalog(Protocol):
         """The Card answering to `name` (oracle name or alias, any case), or None."""
         ...
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+    def find_by_id(self, oracle_id: str) -> Card | None:
         """The Card with this oracle id (the `id` the client card index exposes), or None."""
         ...
 
@@ -42,7 +42,7 @@ class SqlCardCatalog:
     def find(self, name: str) -> Card | None:
         return find_by_oracle_name(self.connection, name)
 
-    def find_by_id(self, oracle_id: uuid.UUID) -> Card | None:
+    def find_by_id(self, oracle_id: str) -> Card | None:
         return find_by_oracle_id(self.connection, oracle_id)
 
     def all_names(self) -> list[str]:

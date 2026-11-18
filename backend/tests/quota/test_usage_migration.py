@@ -5,10 +5,11 @@ from collections.abc import Callable
 from datetime import date
 
 import pytest
-from sqlalchemy import CheckConstraint, Connection, func, inspect, select, text
+from sqlalchemy import Connection, func, select, text
 
 from backend.quota.schema import daily_usage_table, metadata
 from backend.quota.store import SqlUsageStore
+from tests.schema_mirror import assert_schema_mirrors
 
 pytestmark = pytest.mark.integration
 
@@ -31,16 +32,5 @@ def test_deleting_the_account_deletes_its_usage(
     assert store.consume(bob, DAY, limit=5) == 2
 
 
-def test_every_declared_column_and_check_exists_in_the_migrated_database(
-    db_connection: Connection,
-) -> None:
-    inspector = inspect(db_connection)
-    for table in metadata.tables.values():
-        live_checks = {check["name"] for check in inspector.get_check_constraints(table.name)}
-        live_columns = {column["name"] for column in inspector.get_columns(table.name)}
-        live_key = inspector.get_pk_constraint(table.name)["constrained_columns"]
-
-        declared_checks = {c.name for c in table.constraints if isinstance(c, CheckConstraint)}
-        assert declared_checks <= live_checks, table.name
-        assert set(table.columns.keys()) == live_columns, table.name
-        assert live_key == [column.name for column in table.primary_key.columns], table.name
+def test_the_declared_schema_and_the_migrated_database_match(db_connection: Connection) -> None:
+    assert_schema_mirrors(db_connection, metadata)

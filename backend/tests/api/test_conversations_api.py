@@ -1,21 +1,18 @@
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
 
 import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.api.app import Store, User, create_app
 from backend.api.auth import TokenVerifier
+from backend.api.dependencies import Store, User
+from backend.cards.collapse import Card
 from backend.conversations.limits import MAX_TITLE_CHARS, Limits
-from backend.conversations.store import ConversationStore
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
+from tests.api.app_factory import make_app, opening_cards
 from tests.api.tokens import ISSUER, fake_verifier, mint
+from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -27,17 +24,7 @@ def store() -> InMemoryConversationStore:
 
 
 def _app(store: InMemoryConversationStore, verifier: TokenVerifier) -> FastAPI:
-    @contextmanager
-    def open_store() -> Generator[ConversationStore]:
-        yield store
-
-    return create_app(
-        verifier,
-        open_store,
-        open_decks=no_decks,
-        coach=unused_coach,
-        delete_account=unused_account_deletion,
-    )
+    return make_app(store=store, verifier=verifier)
 
 
 def _client(store: InMemoryConversationStore, verifier: TokenVerifier) -> TestClient:
@@ -131,6 +118,65 @@ def test_reading_returns_messages_with_their_trace_ids(
     ]
 
 
+def test_reading_gives_each_answer_its_validated_cards_as_final_did(
+    store: InMemoryConversationStore, cards_by_name: dict[str, Card]
+) -> None:
+    catalog = InMemoryCardCatalog(cards_by_name.values())
+    client = TestClient(make_app(store=store, open_cards=opening_cards(catalog)))
+    conversation = store.create(ALICE, None)
+    store.add_message(ALICE, conversation.id, "user", "Can [[Pouty Poro]] be targeted?")
+    store.add_message(
+        ALICE, conversation.id, "assistant", "Not cheaply: [[Pouty Poro]] has Deflect.", "t-1"
+    )
+    store.add_message(ALICE, conversation.id, "user", "And [[Pouty Poros]]?")
+    store.add_message(ALICE, conversation.id, "assistant", "[[Pouty Poros]] is not a card.", "t-2")
+
+    messages = client.get(f"/conversations/{conversation.id}", headers=_as(ALICE)).json()[
+        "messages"
+    ]
+
+    assert [[c["oracle_name"] for c in m["cards"]] for m in messages] == [
+        [],  # the player's own tags are not validated
+        ["Pouty Poro"],
+        [],
+        [],  # an unknown tag stays plain text
+    ]
+    assert messages[1]["cards"][0] == {
+        "oracle_id": "df4c1239-7d32-465d-8811-c95ed6827185",
+        "oracle_name": "Pouty Poro",
+        "tags": ["Pouty Poro"],
+        "image_url": "https://images.rifthunt.com/cards/normal/front/ogn/013/pouty-poro.webp",
+        "cleaned_text": (
+            "Deflect (Opponents must pay Rainbow Rune to choose me with a spell or ability.)"
+        ),
+    }
+
+
+class _UnreachableCatalog:
+    def find(self, name: str) -> Card | None:
+        raise ConnectionError("cards table unreachable")
+
+    def find_by_id(self, oracle_id: str) -> Card | None:
+        raise ConnectionError("cards table unreachable")
+
+    def all_names(self) -> list[str]:
+        raise ConnectionError("cards table unreachable")
+
+
+def test_an_unreachable_card_catalog_still_reads_the_conversation_with_plain_tags(
+    store: InMemoryConversationStore,
+) -> None:
+    client = TestClient(make_app(store=store, open_cards=opening_cards(_UnreachableCatalog())))
+    conversation = store.create(ALICE, None)
+    store.add_message(ALICE, conversation.id, "assistant", "[[Pouty Poro]] has Deflect.", "t-1")
+
+    response = client.get(f"/conversations/{conversation.id}", headers=_as(ALICE))
+
+    assert response.status_code == 200
+    assert response.json()["messages"][0]["content"] == "[[Pouty Poro]] has Deflect."
+    assert response.json()["messages"][0]["cards"] == []
+
+
 def test_titles_over_the_cap_are_refused(client: TestClient) -> None:
     response = client.post(
         "/conversations", json={"title": "x" * (MAX_TITLE_CHARS + 1)}, headers=_as(ALICE)
@@ -153,7 +199,10 @@ def test_a_player_message_over_the_cap_is_a_422_not_a_500() -> None:
     response = TestClient(app).post(f"/probe/{conversation.id}", headers=_as(ALICE))
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Message is 11 characters; the limit is 10."}
+    assert response.json() == {
+        "detail": "Message is 11 characters; the limit is 10.",
+        "code": "message_too_long",
+    }
 
 
 def test_a_malformed_conversation_id_is_a_validation_error(client: TestClient) -> None:

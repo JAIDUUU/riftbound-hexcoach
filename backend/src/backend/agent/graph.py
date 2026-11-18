@@ -11,10 +11,12 @@ per request with the conversation so far.
 
 import json
 import re
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import (
     AIMessage,
@@ -24,8 +26,11 @@ from langchain_core.messages import (
     ToolCall,
     ToolMessage,
 )
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
+from langgraph.config import get_stream_writer  # pyright: ignore[reportMissingTypeStubs]
 from langgraph.graph import END, START, StateGraph  # pyright: ignore[reportMissingTypeStubs]
 
 from backend.agent.prompts import (
@@ -37,8 +42,11 @@ from backend.agent.prompts import (
     PREPARE_PROMPT,
     TOOLS_NOTE,
 )
+from backend.cards.chunk_text import card_text_chunk
+from backend.cards.collapse import Card
 from backend.retrieval.precedence import order_by_precedence
 from backend.retrieval.repository import SearchHit
+from backend.turns import Mentioned, MentionedCard, MentionedDeck, Turn
 
 ChatModel = Runnable[LanguageModelInput, BaseMessage]
 Retriever = Callable[[str], Sequence[SearchHit]]
@@ -56,10 +64,6 @@ MAX_RETRIEVALS = 2  # the first attempt plus exactly one corrective retry
 MAX_TOOL_ROUNDS = 3  # lookup rounds per answer; after this the model answers with what it has
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
-
-Role = Literal["user", "assistant"]
-Turn = tuple[Role, str]
-"""One conversation turn, oldest first in a history."""
 
 Outcome = Literal["answered", "abstained"]
 """How a run ended: a judge-style answer, or a clarifying question / honest decline."""
@@ -87,35 +91,21 @@ class Step:
 
 @dataclass(frozen=True, slots=True)
 class Token:
-    """A piece of the reply as the model streams it. The streamed pieces are a preview:
-    a provider failing mid-reply restarts it on the next one, so only the final state's
-    answer is authoritative."""
+    """A piece of the reply as the model streams it. The streamed pieces are a preview
+    (a `Reset` discards them), so only the final state's answer is authoritative."""
 
     text: str
 
 
-AgentEvent = Started | Step | Token
+@dataclass(frozen=True, slots=True)
+class Reset:
+    """The reply streamed so far was discarded: a provider failed mid-reply (the next one
+    starts over), or the model wrote text and then called a tool instead of answering.
+    Tokens after it start the reply afresh. Only sent once some text was streamed."""
+
+
+AgentEvent = Started | Step | Token | Reset
 OnEvent = Callable[[AgentEvent], None]
-
-
-@dataclass(frozen=True, slots=True)
-class MentionedCard:
-    """A Card the player @-mentioned, with its full text."""
-
-    name: str
-    text: str  # name, type line and cleaned text, as lookup_card returns them
-
-
-@dataclass(frozen=True, slots=True)
-class MentionedDeck:
-    """A Deck the player @-mentioned, as card names only: no counts and no card text."""
-
-    name: str
-    sections: tuple[tuple[str, tuple[str, ...]], ...]  # (section, oracle names), in order
-
-
-Mentioned = MentionedCard | MentionedDeck
-"""What one @ mention puts into the turn's context (resolved by backend.mentions)."""
 
 
 class AgentState(TypedDict):
@@ -132,6 +122,7 @@ class AgentState(TypedDict):
     retrievals: int
     grade: Literal["strong", "weak"]
     rewritten: bool  # did the grader supply a different query for the retry?
+    looked_up: list[Card]  # the Cards lookup_card found while answering
     answer: str
     outcome: Outcome
 
@@ -170,6 +161,37 @@ def _json_call(llm: ChatModel, system: str, user: str) -> dict[str, Any]:
         return _parse_json(retry)
 
 
+def _card_evidence(card: Card) -> SearchHit:
+    """A Card's text as evidence, exactly as it is indexed for retrieval (`backend
+    load-cards`); it was looked up or mentioned rather than retrieved, so has no chunk."""
+    snapshot_date = card.snapshot_fetched.date()
+    return SearchHit(
+        chunk_id=0,
+        source_type="card_text",
+        rule_id=None,
+        section=None,
+        text=card_text_chunk(card),
+        source_version=snapshot_date.isoformat(),
+        source_date=snapshot_date,
+        title=card.oracle_name,
+        source_url=None,
+    )
+
+
+def evidence(state: AgentState) -> tuple[SearchHit, ...]:
+    """Everything the reply was written from, for citations: the retrieved chunks, then
+    the Cards the player mentioned and the ones looked up, each Card once (a retrieved
+    chunk of a Card's text stands for it)."""
+    hits = list(state["hits"])
+    seen = {hit.title for hit in hits if hit.source_type == "card_text"}
+    mentioned = [m.card for m in state.get("mentions", []) if isinstance(m, MentionedCard)]
+    for card in [*mentioned, *state.get("looked_up", [])]:
+        if card.oracle_name not in seen:
+            seen.add(card.oracle_name)
+            hits.append(_card_evidence(card))
+    return tuple(hits)
+
+
 def format_evidence(hits: Sequence[SearchHit]) -> str:
     """Evidence excerpts for the prompts, ordered by source precedence, cited by name."""
     lines: list[str] = []
@@ -188,17 +210,23 @@ def format_mentions(mentions: Sequence[Mentioned]) -> str:
     blocks = [MENTIONS_NOTE]
     for mention in mentions:
         match mention:
-            case MentionedCard(name=name, text=text):
-                blocks.append(f"[Card: {name}]\n{text}")
+            case MentionedCard():
+                blocks.append(f"[Card: {mention.name}]\n{mention.text}")
             case MentionedDeck(name=name, sections=sections):
                 # Card names contain commas ("Sona, Harmonious"), so they're joined with "; ".
-                lines = [f"{section}: {'; '.join(names)}" for section, names in sections]
+                lines: list[str] = []
+                for section in sections:
+                    if section.cards:
+                        lines.append(f"{section.name}: {'; '.join(section.cards)}")
+                    if section.unrecognised:
+                        written = "; ".join(section.unrecognised)
+                        lines.append(f"{section.name}, unrecognised (as written): {written}")
                 blocks.append("\n".join([f"[Deck: {name}]", *lines]))
     return "\n\n".join(blocks)
 
 
 def _conversation(state: AgentState) -> str:
-    """The conversation so far, then whatever the latest question @-mentions."""
+    """The conversation so far, then what it @-mentions (the latest question's first)."""
     turns = [*state.get("history", []), ("user", state["question"])]
     conversation = "\n".join(f"{role}: {content}" for role, content in turns)
     mentions = state.get("mentions", [])
@@ -282,18 +310,25 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
     def answer(state: AgentState, config: RunnableConfig) -> _Update:
         extra = f"\n\n{TOOLS_NOTE}" if tools else ""
         messages = respond_messages(state, ANSWER_PROMPT, "Evidence", extra)
+        looked_up: list[Card] = []
         for _ in range(MAX_TOOL_ROUNDS):
             reply = answer_model.invoke(messages, config)
             if not isinstance(reply, AIMessage) or not reply.tool_calls:
-                return {"answer": reply.text, "outcome": "answered"}
+                return {"answer": reply.text, "outcome": "answered", "looked_up": looked_up}
             messages.append(reply)
-            messages.extend(run_tool(call, config) for call in reply.tool_calls)
+            results = [run_tool(call, config) for call in reply.tool_calls]
+            messages.extend(results)
+            looked_up.extend(
+                result.artifact
+                for result in results
+                if isinstance(result, ToolMessage) and isinstance(result.artifact, Card)
+            )
         # Still asking for lookups at the cap: force an answer from what it has.
         final = llm.invoke(
             [*messages, HumanMessage("Answer now using only the information you already have.")],
             config,
         )
-        return {"answer": final.text, "outcome": "answered"}
+        return {"answer": final.text, "outcome": "answered", "looked_up": looked_up}
 
     def abstain(state: AgentState) -> _Update:
         messages = respond_messages(state, ABSTAIN_PROMPT, "Evidence that was found (insufficient)")
@@ -317,6 +352,60 @@ def build_agent(llm: ChatModel, retrieve: Retriever, tools: Sequence[BaseTool] =
     return builder.compile()  # pyright: ignore[reportUnknownMemberType]
 
 
+_DISCARDED = "reply_discarded"
+"""What `_DiscardWatcher` writes to the run's custom stream."""
+
+
+class _DiscardWatcher(BaseCallbackHandler):
+    """Spots a spoken reply being thrown away: its model call failed (the provider chain
+    moves on to the next provider), or it ended in tool calls (the answer comes from a
+    later call). Each model call is its own run, so runs are told apart by id.
+
+    It signals through the graph's stream writer rather than calling back directly, so the
+    signal reaches `run_agent` in order with the tokens already streamed.
+    """
+
+    run_inline = True  # in the node's thread and context, where the stream writer lives
+
+    def __init__(self) -> None:
+        self.spoken: set[uuid.UUID] = set()
+
+    def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
+        *,
+        run_id: uuid.UUID,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if (metadata or {}).get("langgraph_node") in _SPOKEN_STEPS:
+            self.spoken.add(run_id)
+
+    def on_llm_end(self, response: LLMResult, *, run_id: uuid.UUID, **kwargs: Any) -> None:
+        if run_id in self.spoken and any(
+            isinstance(generation, ChatGeneration)
+            and isinstance(generation.message, AIMessage)
+            and generation.message.tool_calls
+            for generations in response.generations
+            for generation in generations
+        ):
+            self._discarded(run_id)
+
+    def on_llm_error(self, error: BaseException, *, run_id: uuid.UUID, **kwargs: Any) -> None:
+        if run_id in self.spoken:
+            self._discarded(run_id)
+
+    def _discarded(self, run_id: uuid.UUID) -> None:
+        self.spoken.discard(run_id)
+        get_stream_writer()(_DISCARDED)
+
+
+def _watching_discards(config: RunnableConfig | None) -> RunnableConfig:
+    """`config` with a `_DiscardWatcher` added to its callbacks."""
+    return merge_configs(config, {"callbacks": [_DiscardWatcher()]})
+
+
 def run_agent(
     llm: ChatModel,
     retrieve: Retriever,
@@ -330,8 +419,9 @@ def run_agent(
     """One full graph run. `config` carries LangChain callbacks (e.g. Langfuse tracing).
 
     With `on_event`, the run is streamed: a `Step` as each node begins and `Token`s as
-    the answer (or the clarifying question) is written. Tokens only flow from models that
-    stream, which real chat models do whenever someone is listening.
+    the answer (or the clarifying question) is written, with a `Reset` whenever the text
+    streamed so far is thrown away (see `_DiscardWatcher`). Tokens only flow from models
+    that stream, which real chat models do whenever someone is listening.
     """
     agent = build_agent(llm, retrieve, tools)
     initial = {"question": question, "history": list(history), "mentions": list(mentions)}
@@ -339,9 +429,10 @@ def run_agent(
         return cast(AgentState, agent.invoke(initial, config))
 
     final: Any = None
+    streamed = False  # since the last reset
     # langgraph ships no complete type stubs; the stream's items are untyped tuples.
     for mode, payload in agent.stream(  # pyright: ignore[reportUnknownVariableType]
-        initial, config, stream_mode=["tasks", "messages", "values"]
+        initial, _watching_discards(config), stream_mode=["tasks", "messages", "custom", "values"]
     ):
         if mode == "tasks" and "input" in payload:  # a task start; its end carries "result"
             on_event(Step(payload["name"]))
@@ -352,7 +443,11 @@ def run_agent(
                 and isinstance(chunk, AIMessage)
                 and chunk.text
             ):
+                streamed = True
                 on_event(Token(chunk.text))
+        elif mode == "custom" and payload == _DISCARDED and streamed:
+            streamed = False
+            on_event(Reset())
         elif mode == "values":
             final = payload
     return cast(AgentState, final)

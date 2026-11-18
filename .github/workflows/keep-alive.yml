@@ -3,7 +3,8 @@ name: Keep-alive
 # Free Supabase projects pause after a week of too little database activity ("a few
 # requests a day" is Supabase's rule of thumb), so ping the deployed API's /health, which
 # queries the database, every six hours. Set the repository variable KEEPALIVE_URL to the
-# full health URL, e.g. https://<host>/health; until then the job is skipped.
+# full health URL, e.g. https://<host>/health; until then each run ends with a warning
+# annotation instead of a ping, so nobody mistakes the unpinged project for a kept one.
 # See docs/deployment.md.
 
 on:
@@ -15,12 +16,19 @@ permissions: {}
 
 jobs:
   ping:
-    if: vars.KEEPALIVE_URL != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Warn that nothing is pinged yet
+        if: vars.KEEPALIVE_URL == ''
+        run: >-
+          echo "::warning title=Keep-alive is not configured::The repository variable
+          KEEPALIVE_URL is not set, so the Supabase project is not being kept awake.
+          See docs/deployment.md."
+
       # Retries cover a free host waking from sleep, which can take a minute or more.
       - name: Ping the health endpoint
+        if: vars.KEEPALIVE_URL != ''
         env:
           KEEPALIVE_URL: ${{ vars.KEEPALIVE_URL }}
         run: >-

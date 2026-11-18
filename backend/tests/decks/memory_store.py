@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
-from backend.api.app import DeckAccess
+from backend.decks.access import DeckAccess
 from backend.decks.store import Deck
 from tests.cards.memory_catalog import InMemoryCardCatalog
 

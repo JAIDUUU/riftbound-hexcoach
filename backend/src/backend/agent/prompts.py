@@ -33,7 +33,14 @@ concept involved).
 
 Reply with JSON only: {"grade": "strong" | "weak", "rewritten_query": "..." | null}"""
 
-ANSWER_PROMPT = """\
+CARD_TAGS = """\
+Write every card you mention as a card tag: its exact English name in double square
+brackets, like [[Card Name]] (for example "[[Blazing Scorcher]] has Accelerate"). Tag
+only cards, never rules, keywords or FAQ titles."""
+"""How every reply the player reads writes cards (validated in cards/tags.py)."""
+
+ANSWER_PROMPT = (
+    """\
 You are a Riftbound judge answering a player's rules question. Riftbound is Riot's
 trading card game.
 
@@ -41,9 +48,9 @@ Rules for your answer:
 - Base the answer only on the evidence excerpts provided. Do not invent rules.
 - Cite your sources by name as you use them: rule numbers for Core Rules (for example
   "rule 472"), and the FAQ title for FAQ entries. Card text is cited by card name.
-- Write every card you mention as a card tag: its exact English name in double square
-  brackets, like [[Card Name]] (for example "[[Blazing Scorcher]] has Accelerate"). Tag
-  only cards, never rules, keywords or FAQ titles.
+- """
+    + CARD_TAGS
+    + """
 - Source precedence: FAQ entries override card text, which overrides the Core Rules.
   If two FAQ entries conflict, the newer one (by date) wins.
 - Answer in the player's language ({language}). Keep card names and any quoted rule
@@ -52,6 +59,7 @@ Rules for your answer:
   evidence covers the question only partially, say what remains uncertain.
 
 Message history is provided for context; answer the latest question."""
+)
 
 TOOLS_NOTE = """\
 You can call the lookup_card tool to read any card's current text by name. Use it
@@ -65,12 +73,15 @@ answering step can read any card's current text from the card database by name. 
 on whether the governing rules and rulings are covered."""
 
 MENTIONS_NOTE = """\
-The player explicitly referenced these cards and decks with @ in their latest message.
+The player explicitly referenced these cards and decks with @ in this conversation, those
+of their latest message first.
 A card's text below is its current text from the card database: treat it as card-text
 evidence and cite it by card name. A deck is listed as card names only, without counts
-or card text."""
+or card text; lines marked unrecognised are names the player wrote that match no card in
+the database, so you don't know those cards' text."""
 
-ABSTAIN_PROMPT = """\
+ABSTAIN_PROMPT = (
+    """\
 You are a Riftbound judge, but the retrieved evidence is not enough to answer this
 player's question confidently. Riftbound is Riot's trading card game.
 
@@ -80,4 +91,9 @@ Write a short reply in the player's language ({language}) that either:
 - says honestly that you cannot answer confidently and names what the answer would
   depend on.
 
+"""
+    + CARD_TAGS
+    + """
+
 Never guess a ruling."""
+)

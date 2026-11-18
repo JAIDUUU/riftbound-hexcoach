@@ -5,19 +5,20 @@ SqlConversationStore, so API tests built on this fake can't drift from productio
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
-from backend.agent.graph import Role, Turn
 from backend.conversations.limits import Limits
 from backend.conversations.store import (
     Conversation,
     ConversationDetail,
     Feedback,
     Message,
+    NotAnAnswerError,
     Rating,
-    UnscorableMessageError,
 )
+from backend.turns import Mention, Role
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -73,6 +74,7 @@ class InMemoryConversationStore:
         content: str,
         trace_id: str | None = None,
         message_id: uuid.UUID | None = None,
+        mentions: Sequence[Mention] = (),
     ) -> Message | None:
         if role == "user":
             self.limits.check_message(content)
@@ -86,17 +88,17 @@ class InMemoryConversationStore:
             content=content,
             trace_id=trace_id,
             created_at=now,
+            mentions=tuple(mentions),
         )
         row.messages.append(message)
         row.conversation = replace(row.conversation, updated_at=now)
         return message
 
-    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
+    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
         row = self._owned(user_id, conversation_id)
         if row is None:
             return None
-        recent = row.messages[-self.limits.max_history_messages :]
-        return [(message.role, message.content) for message in recent]
+        return row.messages[-self.limits.max_history_messages :]
 
     def give_feedback(
         self,
@@ -110,8 +112,8 @@ class InMemoryConversationStore:
             return None
         for index, message in enumerate(row.messages):
             if message.id == message_id:
-                if message.role != "assistant" or message.trace_id is None:
-                    raise UnscorableMessageError
+                if message.role != "assistant":
+                    raise NotAnAnswerError
                 given_at = self._now() if message.feedback is None else message.feedback.given_at
                 rated = replace(message, feedback=Feedback(rating=rating, given_at=given_at))
                 row.messages[index] = rated

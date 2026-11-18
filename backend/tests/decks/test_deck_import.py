@@ -1,7 +1,7 @@
 import pytest
 
 from backend.cards.collapse import Card
-from backend.decks.construction import DeckRules
+from backend.decks.construction import CONSTRUCTED, DeckRules
 from backend.decks.importing import (
     DEFAULT_MAX_DECKLIST_CHARS,
     DecklistTooLongError,
@@ -24,9 +24,9 @@ def _kind(warnings: tuple[DeckWarning, ...], kind: str) -> list[DeckWarning]:
 def test_each_line_resolves_to_its_card_by_oracle_name_or_alias_ignoring_case(
     catalog: InMemoryCardCatalog,
 ) -> None:
-    imported = import_decklist("MainDeck:\n3 pouty poro\n2 Recruit (NX)\n", catalog)
+    imported = import_decklist("MainDeck:\n3 pouty poro\n2 Recruit (NX)\n", catalog, CONSTRUCTED)
 
-    assert [(line.line.name, line.card and line.card.oracle_name) for line in imported.lines] == [
+    assert [(r.line.name, r.card and r.card.oracle_name) for r in imported.lines] == [
         ("pouty poro", "Pouty Poro"),
         ("Recruit (NX)", "Recruit"),
     ]
@@ -36,7 +36,7 @@ def test_each_line_resolves_to_its_card_by_oracle_name_or_alias_ignoring_case(
 def test_an_unknown_name_gets_close_suggestions_including_aliases(
     catalog: InMemoryCardCatalog,
 ) -> None:
-    imported = import_decklist("MainDeck:\n3 Pouty Porro\n1 Recruit (NZ)\n", catalog)
+    imported = import_decklist("MainDeck:\n3 Pouty Porro\n1 Recruit (NZ)\n", catalog, CONSTRUCTED)
 
     poro, recruit = imported.lines
     assert poro.card is None
@@ -58,7 +58,7 @@ def test_an_unknown_name_gets_close_suggestions_including_aliases(
 def test_a_name_unlike_any_card_says_there_is_nothing_similar(
     catalog: InMemoryCardCatalog,
 ) -> None:
-    imported = import_decklist("MainDeck:\n1 Xyzzyplugh\n", catalog)
+    imported = import_decklist("MainDeck:\n1 Xyzzyplugh\n", catalog, CONSTRUCTED)
 
     assert imported.lines[0].suggestions == ()
     assert _kind(imported.warnings, "unknown_card") == [
@@ -69,7 +69,7 @@ def test_a_name_unlike_any_card_says_there_is_nothing_similar(
 
 
 def test_parse_warnings_come_through_the_import(catalog: InMemoryCardCatalog) -> None:
-    imported = import_decklist("3 Pouty Poro\n", catalog)
+    imported = import_decklist("3 Pouty Poro\n", catalog, CONSTRUCTED)
 
     assert [warning.kind for warning in imported.warnings][:1] == ["outside_section"]
 
@@ -96,7 +96,7 @@ def _constructed_deck() -> str:
 def test_a_deck_built_to_the_documented_numbers_has_no_structural_warnings(
     catalog: InMemoryCardCatalog,
 ) -> None:
-    assert _structural(import_decklist(_constructed_deck(), catalog).warnings) == []
+    assert _structural(import_decklist(_constructed_deck(), catalog, CONSTRUCTED).warnings) == []
 
 
 SMALL = DeckRules(
@@ -183,10 +183,10 @@ def test_battlefields_must_be_unique_and_runes_have_no_copy_limit(
 def test_a_decklist_over_the_size_cap_is_refused_before_it_is_read(
     catalog: InMemoryCardCatalog,
 ) -> None:
-    import_decklist("Runes:\n12 x", catalog, max_chars=11)
+    import_decklist("Runes:\n12 x", catalog, CONSTRUCTED, max_chars=11)
 
     with pytest.raises(DecklistTooLongError) as caught:
-        import_decklist("Runes:\n12 xy", catalog, max_chars=11)
+        import_decklist("Runes:\n12 xy", catalog, CONSTRUCTED, max_chars=11)
 
     assert (caught.value.length, caught.value.cap) == (12, 11)
     assert str(caught.value) == "Decklist is 12 characters; the limit is 11."
@@ -195,7 +195,7 @@ def test_a_decklist_over_the_size_cap_is_refused_before_it_is_read(
 def test_without_a_cap_any_length_is_read(catalog: InMemoryCardCatalog) -> None:
     text = "MainDeck:\n" + "1 Pouty Poro\n" * 1000
 
-    assert len(import_decklist(text, catalog, max_chars=None).lines) == 1000
+    assert len(import_decklist(text, catalog, CONSTRUCTED, max_chars=None).lines) == 1000
 
 
 def test_the_size_cap_comes_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:

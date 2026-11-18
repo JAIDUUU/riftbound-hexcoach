@@ -5,19 +5,18 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import OpenStore, create_app
+from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
-from tests.api.tokens import fake_verifier, mint
+from tests.api.app_factory import make_app, opening_cards
+from tests.api.tokens import mint
+from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
 BOB = uuid.UUID("bbbbbbbb-0000-4000-8000-000000000002")
@@ -61,26 +60,9 @@ def langfuse() -> FakeLangfuse:
     return FakeLangfuse()
 
 
-def _opener(store: InMemoryConversationStore) -> OpenStore:
-    @contextmanager
-    def open_store() -> Generator[ConversationStore]:
-        yield store
-
-    return open_store
-
-
 @pytest.fixture
 def client(store: InMemoryConversationStore, langfuse: FakeLangfuse) -> TestClient:
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            _opener(store),
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            scores=langfuse,
-        )
-    )
+    return TestClient(make_app(store=store, scores=langfuse))
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -134,6 +116,22 @@ def test_a_thumbs_up_is_scored_on_the_answers_trace_and_shown_on_reload(
     assert _feedback_shown(client, answer.conversation_id) == [None, "up"]
 
 
+def test_the_rated_answer_comes_back_with_its_cards_as_on_reload(
+    store: InMemoryConversationStore, cards_by_name: dict[str, Card]
+) -> None:
+    catalog = InMemoryCardCatalog(cards_by_name.values())
+    client = TestClient(make_app(store=store, open_cards=opening_cards(catalog)))
+    conversation = store.create(ALICE, None)
+    answer = store.add_message(
+        ALICE, conversation.id, "assistant", "[[Pouty Poro]] has Deflect.", "trace-1"
+    )
+    assert answer is not None
+
+    response = _vote(client, conversation.id, answer.id, "up")
+
+    assert [card["oracle_name"] for card in response.json()["cards"]] == ["Pouty Poro"]
+
+
 def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
     client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
 ) -> None:
@@ -153,17 +151,8 @@ def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(
 
 
 def test_without_langfuse_the_vote_is_still_stored(store: InMemoryConversationStore) -> None:
-    client = TestClient(
-        create_app(
-            fake_verifier(),
-            _opener(store),
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            scores=None,
-        )
-    )
-    answer = _answered(store)
+    client = TestClient(make_app(store=store, scores=None))
+    answer = _answered(store, trace_id=None)  # without Langfuse keys no answer has a trace
 
     response = _vote(client, answer.conversation_id, answer.message_id, "down")
 
@@ -180,15 +169,7 @@ def test_a_vote_that_fails_to_commit_is_never_scored(
         raise RuntimeError("commit failed")
 
     client = TestClient(
-        create_app(
-            fake_verifier(),
-            failing_commit,
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            scores=langfuse,
-        ),
-        raise_server_exceptions=False,
+        make_app(open_store=failing_commit, scores=langfuse), raise_server_exceptions=False
     )
     answer = _answered(store)
 
@@ -242,21 +223,51 @@ def test_a_message_from_another_conversation_or_a_made_up_one_is_not_found(
     assert langfuse.scores == []
 
 
-def test_only_answers_with_a_trace_can_receive_feedback(
+def test_only_answers_can_receive_feedback(
     client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
 ) -> None:
-    untraced = _answered(store, trace_id=None)
-    detail = store.get(ALICE, untraced.conversation_id)
+    answer = _answered(store)
+    detail = store.get(ALICE, answer.conversation_id)
     assert detail is not None
     question = detail.messages[0]
 
-    on_question = _vote(client, untraced.conversation_id, question.id, "up")
-    on_untraced_answer = _vote(client, untraced.conversation_id, untraced.message_id, "up")
+    response = _vote(client, answer.conversation_id, question.id, "up")
 
-    assert on_question.status_code == 409
-    assert on_untraced_answer.status_code == 409
-    assert on_untraced_answer.json() == {
-        "detail": "Only answers with a trace can receive feedback."
-    }
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Only answers can receive feedback."}
     assert langfuse.scores == []
-    assert _feedback_shown(client, untraced.conversation_id) == [None, None]
+    assert _feedback_shown(client, answer.conversation_id) == [None, None]
+
+
+def test_an_answer_without_a_trace_is_rated_but_not_scored(
+    client: TestClient, store: InMemoryConversationStore, langfuse: FakeLangfuse
+) -> None:
+    untraced = _answered(store, trace_id=None)
+
+    response = _vote(client, untraced.conversation_id, untraced.message_id, "up")
+
+    assert response.status_code == 200
+    assert langfuse.scores == []
+    assert _feedback_shown(client, untraced.conversation_id) == [None, "up"]
+
+
+class UnreachableLangfuse(FakeLangfuse):
+    def create_score(self, **score: Any) -> None:
+        raise ConnectionError("Langfuse is unreachable")
+
+
+def test_a_score_that_fails_to_send_is_logged_with_what_it_takes_to_resend_it(
+    store: InMemoryConversationStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = TestClient(make_app(store=store, scores=UnreachableLangfuse()))
+    answer = _answered(store)
+
+    response = _vote(client, answer.conversation_id, answer.message_id, "down")
+
+    assert response.status_code == 200
+    assert _feedback_shown(client, answer.conversation_id) == [None, "down"]
+    detail = store.get(ALICE, answer.conversation_id)
+    assert detail is not None and detail.messages[1].feedback is not None
+    given_at = detail.messages[1].feedback.given_at
+    for needed in (str(answer.message_id), "trace-1", "down", given_at.isoformat()):
+        assert needed in caplog.text

@@ -1,7 +1,8 @@
 """Which evidence an answer cites, as structured citations for the client (issue #12).
 
 The answer prompt has the model cite rules by number and FAQs and cards by name, so a
-retrieved chunk counts as cited when its rule id, or its title, appears in the answer.
+retrieved chunk counts as cited when its rule id, or its title as whole words, appears in
+the answer (a short card name inside an ordinary word is not a citation).
 A rule the model cites from memory has no chunk behind it and is left out: a citation
 is something the player can open and read.
 """
@@ -31,6 +32,8 @@ def cited_evidence(answer: str, hits: Sequence[SearchHit]) -> list[SearchHit]:
     def is_cited(hit: SearchHit) -> bool:
         if hit.rule_id is not None:
             return hit.rule_id in rules
-        return hit.title is not None and hit.title.casefold() in lowered
+        if hit.title is None:
+            return False
+        return re.search(rf"(?<!\w){re.escape(hit.title.casefold())}(?!\w)", lowered) is not None
 
     return [hit for hit in order_by_precedence(hits) if is_cited(hit)]

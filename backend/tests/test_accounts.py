@@ -89,7 +89,9 @@ def test_deleting_an_account_removes_the_user_and_everything_they_own(
     count = select(func.count()).select_from(messages_table).where(in_chat)
     assert db_connection.execute(count).scalar_one() == 0
     assert _auth_user_exists(db_connection, bob)
-    assert conversations.history(bob, bobs_chat.id) == [("user", "Still here?")]
+    bobs_history = conversations.history(bob, bobs_chat.id)
+    assert bobs_history is not None
+    assert [(m.role, m.content) for m in bobs_history] == [("user", "Still here?")]
     assert decks.get(bob, bobs_deck.id) == bobs_deck
 
 

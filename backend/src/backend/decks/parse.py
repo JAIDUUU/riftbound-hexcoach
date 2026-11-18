@@ -15,15 +15,26 @@ from backend.decks.warnings import DeckWarning
 Section = Literal["Legend", "Champion", "MainDeck", "Battlefields", "Runes", "Sideboard"]
 SECTIONS: tuple[Section, ...] = get_args(Section)
 
-_HEADER = re.compile(r"(?P<label>[A-Za-z][A-Za-z ]*?)\s*(?P<colon>:)?")
+# A header is a name, then optionally a colon and a section count like "(40)", in either
+# order: "Main Deck (40):", "Rune Deck: (12)".
+_HEADER = re.compile(
+    r"(?P<label>[A-Za-z][A-Za-z _-]*?)\s*(?P<colon>:)?"
+    r"\s*(?P<count>\(\s*\d+\s*\))?\s*(?P<colon_after>:)?"
+)
 _CARD = re.compile(r"(?P<count>\d+)\s+(?P<name>\S.*)")
-_SECTION_BY_KEY: dict[str, Section] = {section.lower(): section for section in SECTIONS}
+_SECTION_BY_KEY: dict[str, Section] = {
+    **{section.lower().removesuffix("s"): section for section in SECTIONS},
+    "main": "MainDeck",
+    "championlegend": "Legend",
+    "chosenchampion": "Champion",
+    "runedeck": "Runes",
+}
 _SECTION_LIST = f"{', '.join(SECTIONS[:-1])} or {SECTIONS[-1]}"
 
 
 @dataclass(frozen=True, slots=True)
 class DeckLine:
-    line: int  # 1-based, so warnings and the editor agree on where a card is
+    number: int  # the 1-based line number, so warnings and the editor agree on where a card is
     section: Section
     count: int
     name: str  # as written; resolving it to a Card is import validation's job
@@ -36,8 +47,12 @@ class ParsedDecklist:
 
 
 def _known_section(label: str) -> Section | None:
-    """The section a header names; `MainDeck`, `Main Deck` and `maindeck` are all one."""
-    return _SECTION_BY_KEY.get(label.replace(" ", "").lower())
+    """The section a header names, ignoring case, spaces, hyphens and underscores and
+    singular or plural: `MainDeck`, `Main Deck` and `main-deck` are one, as are `Rune` and
+    `Runes`. The Core Rules' own names (`Champion Legend`, `Chosen Champion`, `Rune Deck`)
+    and a bare `Main` count too."""
+    key = re.sub(r"[\s_-]+", "", label).lower().removesuffix("s")
+    return _SECTION_BY_KEY.get(key)
 
 
 def parse_decklist(text: str) -> ParsedDecklist:
@@ -50,12 +65,12 @@ def parse_decklist(text: str) -> ParsedDecklist:
         if not stripped:
             continue
         # A bare card name ("Pouty Poro") looks like a header without its colon, so only
-        # the known section names may leave the colon off.
+        # the known section names may leave both the colon and the count off.
         header = _HEADER.fullmatch(stripped)
         if header and (known := _known_section(header["label"])):
             section, in_unknown_section = known, False
             continue
-        if header and header["colon"]:
+        if header and (header["colon"] or header["count"] or header["colon_after"]):
             section, in_unknown_section = None, True
             warnings.append(
                 DeckWarning(

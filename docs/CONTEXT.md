@@ -7,7 +7,7 @@ Domain terms used across the code and docs. See [Grill Decisions.md](Grill%20Dec
 - **Card:** a distinct Riftbound card, identified by its `oracle_id`. All printings of the same card are the same Card; its text and stats come from one representative printing, because printing text can differ (see [ADR 0002](adr/0002-rifthunt-card-snapshot.md)).
 - **Printing:** one physical version of a Card (plain, Metal, alternate art, overnumbered, signature). Rifthunt gives each a `printing_id`. We collapse printings into one representative printing: plain over variant, official over third-party, then the latest set release.
 - **Oracle id:** the id shared by every printing of the same Card. The term comes from Magic databases.
-- **Oracle name:** the base card name shared by all printings, without a variant suffix. Mentions, `@` search and decklists match on it.
+- **Oracle name:** the base card name shared by all printings, without a variant suffix. `@` search, decklists, `lookup_card` and Card tags match on it (or an alias). A Card Mention carries the Card's oracle id instead, picked from the client card index.
 - **Cleaned text:** a card's rules text after ingestion cleanup: icon shortcodes (such as `:rb_energy_1:`) rewritten as words, keyword brackets stripped and cost arrows normalised (details in [ADR 0002](adr/0002-rifthunt-card-snapshot.md)). Used for retrieval and prompts. The **raw text** is kept alongside it.
 - **Card snapshot:** the committed copy of Rifthunt's bulk card data, with its fetched date.
 
@@ -36,12 +36,22 @@ Domain terms used across the code and docs. See [Grill Decisions.md](Grill%20Dec
 
 ## Chat interface
 
-- **Mention (`@`):** a user-picked Card or Deck in the composer, injected into the conversation context. Cards are injected with full text, Decks as card names only.
+- **Mention (`@`):** a user-picked Card (by oracle id) or Deck (by deck id) in the composer, injected into the conversation context. Cards are injected with full text, Decks as card names only. A conversation's Mentions are stored with its messages and stay in context for later turns, the latest message's first.
+- **Reset:** the stream event telling the client to discard the answer text streamed so far, because the model started that reply over.
 - **Card tag (`[[Card Name]]`):** the markup the model uses for a card in an answer. Only tags validated against the card database get hover previews.
 - **Conversation / Message:** the stored chat history, kept in our own tables.
+
+## Message limits
+
+- **Message limits:** the caps on a player's messages: the Throttle, the Daily quota and the input caps (message, decklist and mention counts, history window).
+- **Throttle:** at most `MESSAGES_PER_MINUTE` messages in any sliding minute, kept in memory per API process.
+- **Daily quota:** at most `MESSAGES_PER_DAY` messages per UTC calendar day, counted in Postgres across processes. It resets at 00:00 UTC.
+- **Slot:** one message's place in a limit. A message takes a slot in both the Throttle and the Daily quota.
+- **Reservation:** the slots a message takes once every other check has passed, held until its turn ends.
+- **Refund:** giving a Reservation's slots back because its turn didn't end in an answer. Only answered messages count.
 
 ## Evaluation and observability
 
 - **Golden set:** the hand-written set of about 30-50 rulings with expected rule numbers, run as a Langfuse dataset and experiment.
 - **Trace:** the Langfuse record of one chat response. Its id is returned to the frontend so that feedback can be scored on it.
-- **Feedback:** the thumbs up/down on a message, sent as a Langfuse score on that message's trace.
+- **Feedback:** the thumbs up/down on an answer, stored with it and sent as a Langfuse score on its trace when it has one.

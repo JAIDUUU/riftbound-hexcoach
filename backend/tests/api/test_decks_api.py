@@ -6,14 +6,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.api.app import DeckAccess, create_app
 from backend.cards.collapse import Card
-from backend.conversations.limits import Limits
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
-from tests.api.tokens import fake_verifier, mint
+from backend.decks.access import DeckAccess
+from backend.decks.construction import DeckRules
+from tests.api.app_factory import make_app
+from tests.api.tokens import mint
 from tests.cards.memory_catalog import InMemoryCardCatalog
-from tests.conversations.memory_store import InMemoryConversationStore
 from tests.decks.memory_store import InMemoryDeckStore
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
@@ -31,26 +29,13 @@ def decks() -> InMemoryDeckStore:
 
 @pytest.fixture
 def client(decks: InMemoryDeckStore, cards_by_name: dict[str, Card]) -> TestClient:
-    conversations = InMemoryConversationStore(Limits())
     cards = InMemoryCardCatalog(cards_by_name.values())
-
-    @contextmanager
-    def open_store() -> Generator[InMemoryConversationStore]:
-        yield conversations
 
     @contextmanager
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, cards)
 
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            open_store,
-            open_decks=open_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-        )
-    )
+    return TestClient(make_app(open_decks=open_decks))
 
 
 def _as(user: uuid.UUID) -> dict[str, str]:
@@ -169,19 +154,7 @@ def test_reading_a_deck_validates_it_against_the_current_cards(
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, cards)
 
-    @contextmanager
-    def no_conversations() -> Generator[InMemoryConversationStore]:
-        yield InMemoryConversationStore(Limits())
-
-    client = TestClient(
-        create_app(
-            fake_verifier(),
-            no_conversations,
-            open_decks=open_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-        )
-    )
+    client = TestClient(make_app(open_decks=open_decks))
     saved = client.post(
         "/decks",
         json={"name": "Early", "decklist": "Legend:\n1 Annie, Dark Child"},
@@ -195,11 +168,31 @@ def test_reading_a_deck_validates_it_against_the_current_cards(
     assert _section(read["validation"], "Legend")[0]["card"]["oracle_name"] == "Annie, Dark Child"
 
 
-@pytest.mark.parametrize("name", ["", "x" * 101])
-def test_a_deck_name_must_be_present_and_short(client: TestClient, name: str) -> None:
-    response = client.post("/decks", json={"name": name, "decklist": ""}, headers=_as(ALICE))
+@pytest.mark.parametrize("name", ["", "   \t", "x" * 101])
+def test_a_deck_name_must_be_present_and_short(
+    client: TestClient, decks: InMemoryDeckStore, name: str
+) -> None:
+    saved = decks.create(ALICE, "Kept", "")
 
-    assert response.status_code == 422
+    create = client.post("/decks", json={"name": name, "decklist": ""}, headers=_as(ALICE))
+    rename = client.put(
+        f"/decks/{saved.id}", json={"name": name, "decklist": ""}, headers=_as(ALICE)
+    )
+
+    assert (create.status_code, rename.status_code) == (422, 422)
+    assert decks.list_for_user(ALICE) == [saved]
+
+
+def test_a_deck_name_is_saved_without_surrounding_spaces_and_need_not_be_unique(
+    client: TestClient,
+) -> None:
+    body = {"name": "  Annie burn \n", "decklist": ""}
+
+    first = client.post("/decks", json=body, headers=_as(ALICE)).json()
+    second = client.post("/decks", json=body, headers=_as(ALICE)).json()
+
+    assert first["name"] == second["name"] == "Annie burn"
+    assert first["id"] != second["id"]
 
 
 def _capped_client(decks: InMemoryDeckStore, max_chars: int) -> TestClient:
@@ -207,19 +200,7 @@ def _capped_client(decks: InMemoryDeckStore, max_chars: int) -> TestClient:
     def open_decks() -> Generator[DeckAccess]:
         yield DeckAccess(decks, InMemoryCardCatalog([]), max_decklist_chars=max_chars)
 
-    @contextmanager
-    def no_conversations() -> Generator[InMemoryConversationStore]:
-        yield InMemoryConversationStore(Limits())
-
-    return TestClient(
-        create_app(
-            fake_verifier(),
-            no_conversations,
-            open_decks=open_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-        )
-    )
+    return TestClient(make_app(open_decks=open_decks))
 
 
 def test_a_decklist_over_the_size_cap_is_a_plain_422_and_nothing_is_saved(
@@ -228,7 +209,10 @@ def test_a_decklist_over_the_size_cap_is_a_plain_422_and_nothing_is_saved(
     client = _capped_client(decks, max_chars=10)
     saved = decks.create(ALICE, "Short", "Runes:")
     too_long = "x" * 11
-    expected = {"detail": "Decklist is 11 characters; the limit is 10."}
+    expected = {
+        "detail": "Decklist is 11 characters; the limit is 10.",
+        "code": "decklist_too_long",
+    }
 
     preview = client.post("/decks/preview", json={"decklist": too_long}, headers=_as(ALICE))
     create = client.post("/decks", json={"name": "Long", "decklist": too_long}, headers=_as(ALICE))
@@ -250,3 +234,25 @@ def test_a_deck_saved_before_the_cap_was_lowered_can_still_be_read(
 
     assert response.status_code == 200
     assert response.json()["decklist"] == "Runes:\n12 Fury Rune\n"
+
+
+def test_the_deck_rules_the_app_is_given_are_the_ones_every_route_checks(
+    decks: InMemoryDeckStore, cards_by_name: dict[str, Card]
+) -> None:
+    cards = InMemoryCardCatalog(cards_by_name.values())
+    two_runes = DeckRules(rune_cards=2)
+
+    @contextmanager
+    def open_decks() -> Generator[DeckAccess]:
+        yield DeckAccess(decks, cards, rules=two_runes)
+
+    client = TestClient(make_app(open_decks=open_decks))
+    decklist = "Runes:\n2 Fury Rune\n"
+
+    preview = client.post("/decks/preview", json={"decklist": decklist}, headers=_as(ALICE))
+    saved = client.post("/decks", json={"name": "Runes", "decklist": decklist}, headers=_as(ALICE))
+
+    for validation in (preview.json(), saved.json()["validation"]):
+        sizes = [w["message"] for w in validation["warnings"] if w["kind"] == "section_size"]
+        assert not [message for message in sizes if message.startswith("Runes")]
+        assert "Legend has 0 cards; a deck needs exactly 1." in sizes  # the rest still apply

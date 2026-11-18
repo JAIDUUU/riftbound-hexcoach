@@ -4,10 +4,11 @@ import uuid
 from collections.abc import Callable
 
 import pytest
-from sqlalchemy import Connection, func, inspect, select, text
+from sqlalchemy import Connection, func, select, text
 
 from backend.decks.schema import decks_table, metadata
 from backend.decks.store import SqlDeckStore
+from tests.schema_mirror import assert_schema_mirrors
 
 pytestmark = pytest.mark.integration
 
@@ -28,13 +29,5 @@ def test_deleting_the_account_deletes_its_decks(
     assert store.get(bob, kept.id) == kept
 
 
-def test_every_declared_column_and_index_exists_in_the_migrated_database(
-    db_connection: Connection,
-) -> None:
-    inspector = inspect(db_connection)
-    for table in metadata.tables.values():
-        live_indexes = {index["name"] for index in inspector.get_indexes(table.name)}
-        live_columns = {column["name"] for column in inspector.get_columns(table.name)}
-
-        assert {index.name for index in table.indexes} <= live_indexes, table.name
-        assert set(table.columns.keys()) == live_columns, table.name
+def test_the_declared_schema_and_the_migrated_database_match(db_connection: Connection) -> None:
+    assert_schema_mirrors(db_connection, metadata)

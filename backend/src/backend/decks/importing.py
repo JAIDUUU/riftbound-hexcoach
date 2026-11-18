@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from backend.cards.catalog import CardCatalog, close_names
 from backend.cards.collapse import Card
 from backend.config import positive_int_env
-from backend.decks.construction import CONSTRUCTED, DeckRules
+from backend.decks.construction import DeckRules
 from backend.decks.parse import DeckLine, Section, parse_decklist
 from backend.decks.warnings import DeckWarning
 
@@ -64,12 +64,12 @@ def _cards(count: int) -> str:
 
 
 def _unknown_card(line: DeckLine, suggestions: list[str]) -> DeckWarning:
-    missing = f"Line {line.line}: no card named {line.name!r}"
+    missing = f"Line {line.number}: no card named {line.name!r}"
     if suggestions:
         return DeckWarning(
-            "unknown_card", f"{missing}. Did you mean {', '.join(suggestions)}?", line.line
+            "unknown_card", f"{missing}. Did you mean {', '.join(suggestions)}?", line.number
         )
-    return DeckWarning("unknown_card", f"{missing}, and no similar name exists.", line.line)
+    return DeckWarning("unknown_card", f"{missing}, and no similar name exists.", line.number)
 
 
 def _section_sizes(lines: Sequence[ResolvedLine], rules: DeckRules) -> list[DeckWarning]:
@@ -141,7 +141,7 @@ def _copy_limits(lines: Sequence[ResolvedLine], rules: DeckRules) -> list[DeckWa
 def import_decklist(
     text: str,
     cards: CardCatalog,
-    rules: DeckRules = CONSTRUCTED,
+    rules: DeckRules,
     *,
     max_chars: int | None = DEFAULT_MAX_DECKLIST_CHARS,
 ) -> DeckImport:

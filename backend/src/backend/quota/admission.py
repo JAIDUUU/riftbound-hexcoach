@@ -16,6 +16,7 @@ The numbers are configuration with placeholder defaults: Grill Decisions sets th
 ones once the free-tier limits of the providers and Supabase are verified.
 """
 
+import logging
 import math
 import threading
 import uuid
@@ -28,6 +29,8 @@ from typing import Literal
 
 from backend.config import positive_int_env, require_positive
 from backend.quota.store import UsageStore
+
+_log = logging.getLogger(__name__)
 
 DEFAULT_MESSAGES_PER_MINUTE = 5  # placeholder until the free-tier limits are verified
 DEFAULT_MESSAGES_PER_DAY = 50  # placeholder until the free-tier limits are verified
@@ -76,11 +79,16 @@ class Reservation:
 
     user_id: uuid.UUID
     at: datetime  # UTC; the minute slot it holds, and so the day it was counted on
-    refunded: bool = False
+    refund_state: Literal["none", "in_progress", "done"] = "none"
+    minute_freed: bool = False
 
     @property
     def day(self) -> date:
         return self.at.date()
+
+    @property
+    def refunded(self) -> bool:
+        return self.refund_state == "done"
 
 
 def _seconds_until(moment: datetime, now: datetime) -> int:
@@ -128,15 +136,35 @@ class MessageQuota:
         return reservation
 
     def refund(self, reservation: Reservation) -> None:
-        """Give the message's slots back (its turn didn't end in an answer). Only the
-        first refund of a reservation does anything."""
+        """Give the message's slots back (its turn didn't end in an answer).
+
+        Once a refund succeeds, further refunds of the reservation do nothing, as does
+        one made while another is under way. If giving back the daily slot fails, the
+        error is logged with what an operator needs to give it back by hand, the
+        reservation stays refundable, and the error is raised.
+        """
         with self._lock:
-            if reservation.refunded:
+            if reservation.refund_state != "none":
                 return
-            reservation.refunded = True
-        self._free_minute_slot(reservation)
-        with self.open_usage() as usage:
-            usage.release(reservation.user_id, reservation.day)
+            reservation.refund_state = "in_progress"
+            if not reservation.minute_freed:
+                self._free_minute_slot_locked(reservation)
+                reservation.minute_freed = True
+        try:
+            with self.open_usage() as usage:
+                usage.release(reservation.user_id, reservation.day)
+        except BaseException:
+            _log.exception(
+                "Could not give back the daily message of user %s on %s (UTC);"
+                " their usage count for that day is one too high",
+                reservation.user_id,
+                reservation.day.isoformat(),
+            )
+            with self._lock:
+                reservation.refund_state = "none"
+            raise
+        with self._lock:
+            reservation.refund_state = "done"
 
     def _take_minute_slot(self, reservation: Reservation) -> None:
         now = reservation.at
@@ -154,6 +182,9 @@ class MessageQuota:
 
     def _free_minute_slot(self, reservation: Reservation) -> None:
         with self._lock:
-            recent = self._recent.get(reservation.user_id)
-            if recent is not None and reservation.at in recent:
-                recent.remove(reservation.at)  # already gone if its minute has passed
+            self._free_minute_slot_locked(reservation)
+
+    def _free_minute_slot_locked(self, reservation: Reservation) -> None:
+        recent = self._recent.get(reservation.user_id)
+        if recent is not None and reservation.at in recent:
+            recent.remove(reservation.at)  # already gone if its minute has passed

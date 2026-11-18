@@ -43,7 +43,9 @@ uv run backend eval-agent --run-name <name>      # run the full agent on the gol
 
 `refresh-cards` rewrites `data/cards/rifthunt-snapshot.json` (one card per line, so diffs stay
 readable) and regenerates `data/cards/card-index.json`, the static index for the frontend's `@`
-menu. Per Rifthunt's request it is run at most daily. Commit the result.
+menu (each card's `id`, `name`, `aliases`, `type`, `domains`, and as `image` the same absolute
+preview URL as `final.cards`). Per Rifthunt's request it is run at most daily. Commit the
+result.
 
 `load-cards` makes the `cards` table match the snapshot: every card is upserted and cards no
 longer present are deleted. Both commands warn about icon shortcodes the cleaner doesn't know
@@ -108,8 +110,8 @@ merges the two rankings with reciprocal rank fusion; `--keyword-only` skips the 
 Memory footprint (matters for hosting): embedding a query costs about **270 MB RSS** for
 the whole Python process with the model loaded. Bulk ingestion peaks around **1.2 GB RSS**
 (batches of 32 passages; fastembed's default batch of 256 peaked near 7 GB) and takes
-roughly two minutes for the ~2,500 rule chunks on CPU. The API process with the model
-loaded measured about **370 MB RSS** (see `docs/deployment.md`).
+roughly two minutes for the ~2,500 rule chunks on CPU. The API process with the whole
+chat path built and the model loaded measured about **420 MB RSS** (see `docs/deployment.md`).
 
 `eval-retrieval` uploads the golden set (`data/golden/golden-set.yaml`, hand-written rulings
 with the Core Rules ids a correct answer must cite) to the Langfuse dataset `hexcoach-golden`
@@ -127,7 +129,7 @@ lives in `backend/evals/agent_eval.py` and is unit-tested without any network.
 
 ### The HTTP API
 
-`serve` runs a FastAPI app (`backend/api/app.py`). It needs `DATABASE_URL`,
+`serve` runs a FastAPI app (`backend/api/app.py` composes it from one module per area). It needs `DATABASE_URL`,
 `SUPABASE_URL` and at least one chat provider key at startup. Every endpoint except
 `GET /health` needs the signed-in user's Supabase access token as
 `Authorization: Bearer <jwt>`. Tokens are verified
@@ -137,7 +139,9 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
 
 - `POST /conversations` (optional `title`, at most 200 characters), `GET /conversations`
   (most recently active first), `GET /conversations/{id}` (with messages, oldest first,
-  each carrying its trace id), `DELETE /conversations/{id}`.
+  each carrying its trace id, its feedback, for a player message its `mentions` and for an
+  answer its validated `cards`),
+  `DELETE /conversations/{id}`.
 - Someone else's conversation is a plain 404, the same as one that doesn't exist.
 - Deleting a conversation cascades to its messages; deleting the Supabase account
   cascades to its conversations.
@@ -147,13 +151,16 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   characters, 20 messages) are placeholders until the free-tier limits are verified.
 - Message limits per player (see "Message limits" below) refuse a message with a 429.
 - `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
-  records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
-  The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
-  shows it after a reload, and is sent to Langfuse as a `feedback` BOOLEAN score on the
-  answer's trace once the vote has committed. Langfuse replaces a score only when its id,
-  name and timestamp date all match, so each message has one score id and the backend
-  resends the time feedback was first given: changing the vote replaces the score.
-  Without Langfuse keys the vote is only stored.
+  records Feedback on an answer. Any answer can be rated; the player's own messages can't
+  (409). The rating is stored on the message (migrations 0009 and 0012), so
+  `GET /conversations/{id}` shows it after a reload. If the answer has a trace id, the
+  rating is also sent to Langfuse as a `feedback` BOOLEAN score on its trace once the vote
+  has committed. Langfuse replaces a score only when its id, name and timestamp date all
+  match, so each message has one score id and the backend resends the time feedback was
+  first given: changing the vote replaces the score. An answer written without Langfuse
+  keys has no trace, so its vote is only stored. A score that fails to send is logged (with
+  the message id, trace id, rating and time given, enough to resend it); the vote stays
+  stored.
 - `DELETE /account` deletes the signed-in user's own account (204, also when it is already
   gone). It deletes the `auth.users` row over the backend's own database connection
   (`backend/accounts.py`), so no Supabase service-role secret is needed. Supabase documents
@@ -187,16 +194,23 @@ limit, below). Once the response is a 200, the events are:
 | `start`  | `message_id`, `trace_id` (null when untraced)         | always first                            |
 | `status` | `step`: `prepare`, `retrieve`, `grade`, `answer` or `abstain` | as each graph step begins; a corrective retry repeats `retrieve` and `grade` |
 | `token`  | `text`                                                | while the answer is written             |
+| `reset`  | `{}`                                                  | the text streamed so far was discarded  |
 | `final`  | `text`, `outcome` (`answered`/`abstained`), `citations`, `cards` | last, on success                 |
 | `error`  | `code`, `message` (safe to show the player)           | last, on failure                        |
 
 `message_id` is the assistant message's id, and the answer is stored under it together with the
 trace id just before `final` is sent, so the feedback endpoint above accepts a vote on it once
 `final` has arrived (earlier it is a 404). Streamed tokens are a
-preview: if a provider fails halfway through a reply, the next provider starts over, so the client
-should replace the streamed text with `final.text`. `citations` are the retrieved chunks the
-answer actually cites (by rule number, FAQ title or card name), most authoritative source first,
-each with `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and `text`.
+preview. On `reset` the client clears the text streamed so far and starts again from the next
+`token`: the agent sends it when a reply it was writing is thrown away, because the provider
+failed halfway through (the next provider starts over) or because the model wrote some text and
+then looked a card up instead of answering. `reset` is only sent after some text was streamed.
+`final.text` is the authoritative answer, so the client replaces the streamed text with it.
+`citations` are the evidence the answer actually cites (by rule number, or by FAQ title or
+card name as whole words), most authoritative source first: the retrieved chunks, plus the
+text of every Card the player @-mentioned or the agent looked up with `lookup_card` (each Card
+once). Each has `source_type`, `rule_id`, `title`, `section`, `source_date`, `source_url` and
+`text`.
 `cards` holds the answer's validated card tags (below). Error codes:
 `providers_unavailable` (every provider in the chain failed), `conversation_deleted` (deleted
 while the answer was being written) and `internal`. On an error the player's message stays
@@ -206,11 +220,31 @@ stored and no answer is.
 id is its `id` in the client card index (`data/cards/card-index.json`, the oracle id); a
 deck's id is one of the player's saved decks. The agent sees each mentioned card's full
 text and each mentioned deck as card names only (each Card once, under its section, no
-counts or card text), marked as cards the player explicitly referenced, for this turn only.
-Mentions aren't stored: later turns see the message's text, so the client should keep the
-chip's name in `content`. A card id that doesn't exist, a deck that isn't the player's, or
-more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and nothing is
-stored or run.
+counts or card text, with lines that match no Card listed as written and marked
+unrecognised), marked as cards the player explicitly referenced.
+
+Mentions are stored with the message as sent (kind and id, migration 0013), and
+`GET /conversations/{id}` returns them on each player message so a reload can redraw the
+chips. Later turns see them again: the agent gets the current message's mentions, then those
+of the player messages in the history window (`MAX_HISTORY_MESSAGES`), newest first, each
+once, resolved afresh (a card's current text, a deck's current list). An earlier mention that
+no longer resolves (the deck was deleted, say) is skipped without a word. Only the current
+message's mentions are checked: a card id that doesn't exist, a deck that isn't the
+player's, or more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and
+nothing is stored or run.
+
+These refusals carry a `code` the frontend can branch on, as the 429s below do:
+
+```json
+{"detail": "No card with id f30de1e6-73f9-4b64-9211-791d0fc422e7.", "code": "unknown_card"}
+```
+
+`code` is `message_too_long` (over `MAX_MESSAGE_CHARS`, on any endpoint that takes a player
+message), `too_many_mentions`, `unknown_card` (a card id the cards table doesn't have, for
+example from an outdated client card index), `unknown_deck` (deleted, or not the player's) or
+`decklist_too_long` (the deck endpoints, below). A malformed body, such as an empty message or
+a mention of an unknown kind, keeps FastAPI's validation error shape: a `detail` list and no
+`code`.
 
 ```bash
 curl -N -X POST "http://127.0.0.1:8000/conversations/$CONVERSATION_ID/messages" \
@@ -236,6 +270,12 @@ event: status
 data: {"step":"answer"}
 
 event: token
+data: {"text":"Let me check"}
+
+event: reset
+data: {}
+
+event: token
 data: {"text":"No"}
 
 event: token
@@ -245,13 +285,15 @@ event: final
 data: {"text":"No - a battlefield scores once per turn (rule 472).","outcome":"answered","citations":[{"source_type":"rules","rule_id":"472","title":null,"section":"Scoring","source_date":"2026-10-09","source_url":null,"text":"..."}],"cards":[]}
 ```
 
-`-N` turns off curl's buffering so events print as they arrive. Idle stretches longer than 15
+Here the model started writing, then looked a card up (`reset`), then answered. `-N` turns
+off curl's buffering so events print as they arrive. Idle stretches longer than 15
 seconds (a slow provider) get a `: ping` comment line, which SSE parsers ignore. Browsers can't
 use `EventSource` for a POST, so the frontend reads the stream with `fetch`.
 
 #### Card tags
 
-The answer prompt has the model write each card as a **Card tag**, `[[Card Name]]`. A tag is
+Both reply prompts (the answer and the abstention) have the model write each card as a **Card
+tag**, `[[Card Name]]`. A tag is
 `[[`, then text with no square brackets, then `]]`; streamed tokens and `final.text` keep the
 markup as written. Once the answer is finished and stored, each tag is checked against the
 cards table with the same matcher as decklists (`cards/tags.py`): it validates only if it
@@ -276,8 +318,14 @@ allowed**: Rifthunt's terms cover the image host but don't mention hotlinking (c
 2026-11-17; the host does answer cross-origin requests). The URL shape is unverified too:
 Rifthunt documents these URLs only on its per-card API objects, not in the bulk snapshot, so
 `cards/images.py` rebuilds them from the stored set, collector number and name, which matched
-all 1110 Cards on 2026-11-17. Stored answers carry no card data: `GET /conversations/{id}`
-returns the text with its tags, not validated cards.
+all 1110 Cards on 2026-11-17.
+
+Stored answers keep only their text. `GET /conversations/{id}` validates each answer's tags
+again when it is read, the same way, and sends them as that message's `cards` (the feedback
+`PUT` returns the rated answer the same way), so a reload shows the previews `final` did.
+They are checked against the cards table as it is at read time, and an unreadable table
+gives `cards: []` rather than a failed read. A player message's own `[[...]]` is never
+validated: its `cards` is always `[]`.
 
 #### Message limits
 
@@ -305,11 +353,21 @@ What counts: only a message whose turn ends in `final`. On
 `POST /conversations/{id}/messages` the limits are checked last, after the token (401), the
 conversation (404), the length cap and the mentions (422), so a refused message never takes a
 slot. The slot it takes is refunded, in both limits, if the turn ends in an `error` event
-(`providers_unavailable`, `internal`, `conversation_deleted`) or the message can't be stored.
+(`providers_unavailable`, `internal`, `conversation_deleted`), if the message can't be stored,
+or if the client is gone before the stream opens, so the run never starts (the question
+stays stored, unanswered, and is left out of later turns' history like any unanswered one).
 A refund goes back to the UTC day the message was counted on. A player who disconnects
-mid-answer still uses their slot: the run carries on and stores the answer, which they find
-on their next visit. A 429 takes no slot in either limit. If the API process dies mid-run, the
-day's slot stays taken (and the minute's goes with the process).
+mid-answer still uses their slot: the run is not cancelled, and it stores the answer, which
+they find on their next visit. Cancelling would save the rest of the provider calls but lose
+that answer, and the run has no cheap way to stop mid-call, so it is left to finish. A 429
+takes no slot in either limit. If the API process dies mid-run, the day's slot stays taken
+(and the minute's goes with the process).
+
+Slots are taken before the run, not after the answer: a message holds its slot for the whole
+turn and only gets it back if the turn fails. So a message sent while another is still
+running can get a 429 for a slot the running one later gives back. That is a deliberate
+trade-off: taking the slot first is what stops two messages from both getting the last one,
+and the player who was refused can send again after `retry_after`.
 
 Each of these steps is its own short transaction, run one after another, so a message never
 holds two pooled connections at once.
@@ -332,21 +390,27 @@ exposes it.
 Decks are per account, with the same ownership rules (someone else's deck is a 404):
 
 - `POST /decks/preview` (`decklist`) runs import validation without saving.
-- `POST /decks` (`name`, at most 100 characters, and `decklist`), `GET /decks` (summaries,
+- `POST /decks` (`name`, trimmed, 1 to 100 characters, and `decklist`), `GET /decks` (summaries,
   most recently updated first), `GET /decks/{id}`, `PUT /decks/{id}` (replaces name and
   text), `DELETE /decks/{id}`. Deleting the Supabase account cascades to its decks.
+  Names needn't be unique: decks are told apart, and @-mentioned, by id.
 - Create, read, update and preview return the validation: every section with its lines,
   each resolved to a card (`oracle_id`, `oracle_name`) or `null` with close-name
   suggestions, plus a list of typed warnings (`malformed_line`, `outside_section`,
   `unknown_section`, `unknown_card`, `section_size`, `copy_limit`). Warnings never block
   saving.
 - A decklist over `MAX_DECKLIST_CHARS` (default 4000, an unverified placeholder) is a 422
-  on preview, create and update, and nothing is saved. Reading a deck saved before the cap
+  with `code` `decklist_too_long` on preview, create and update, and nothing is saved. Reading a deck saved before the cap
   was lowered still works.
 
 Decklists are parsed in code (`backend/decks/parse.py`), never by the LLM: one header per
 section (Legend, Champion, MainDeck, Battlefields, Runes, Sideboard) and `<count> <name>`
-lines, where names can contain commas and colons. Only the text is stored. Validation is
+lines, where names can contain commas and colons. Headers ignore case, spaces, hyphens and
+underscores, singular or plural, the colon, and a section count (`Main Deck (40):`,
+`rune (12)`); the Core Rules' names (`Champion Legend`, `Chosen Champion`, `Rune Deck`) work
+too. Any other header with a colon or a count (`Tokens:`, `Tokens (2)`) is an
+`unknown_section`: it is reported and the cards under it are left out of every section,
+rather than counted toward the one before it. Only the text is stored. Validation is
 recomputed from it on every read, so a card snapshot refresh is picked up. Cards resolve
 through the same oracle-name/alias matcher and alias-aware suggestions as `lookup_card`
 (`backend/cards/catalog.py`). `import_decklist` (`backend/decks/importing.py`) is the one
@@ -355,7 +419,9 @@ there. The structural numbers (`backend/decks/construction.py`) are **unverified
 placeholders read from the Core and Tournament Rules for constructed play: 1 Legend,
 1 Champion, a 40-card Main Deck counting the Champion, 3 unique Battlefields, 12 Runes, a
 Sideboard of at most 10, and at most 3 copies of a card across Champion, Main Deck and
-Sideboard.
+Sideboard. They are chosen in one place, `DeckAccess.rules` (`backend/decks/access.py`),
+which every deck route and deck mention imports through; a different format would be a
+different `DeckRules` there.
 
 ### Supabase's Data API is closed
 
@@ -381,9 +447,17 @@ keys, the API runs against in-memory stores, feedback scores go to a fake Langfu
 and the message endpoint gets a scripted coach in place of the agent
 (`backend.agent.coach.Coach`). Contract suites hold each fake to the same rules as its
 Postgres counterpart: `tests/conversations/test_store_contract.py` (ownership and
-feedback), `tests/decks/test_deck_store_contract.py` (ownership) and
-`tests/cards/test_catalog_contract.py` (card-name matching). The agent's own streaming is
-tested with a fake chat model that streams word by word.
+feedback), `tests/decks/test_deck_store_contract.py` (ownership),
+`tests/cards/test_catalog_contract.py` (card-name matching) and
+`tests/quota/test_usage_store_contract.py` (daily message counting). The agent's own
+streaming is tested with a fake chat model that streams word by word.
+
+One check needs the real Langfuse: that a changed vote replaces the answer's feedback score
+rather than adding a second one is Langfuse's merge rule, which a fake can't confirm.
+`uv run pytest -m langfuse_live -s` (from `backend/`, with the `LANGFUSE_*` keys set) sends
+two votes to a new `vote-replacement-check` trace in that project and polls the Langfuse API
+until a single `feedback` score holds the second one. It is deselected by default and skips
+without keys.
 
 ### Tracing
 

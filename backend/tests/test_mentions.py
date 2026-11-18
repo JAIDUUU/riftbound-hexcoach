@@ -2,10 +2,11 @@ import uuid
 
 import pytest
 
-from backend.agent.graph import MentionedCard, MentionedDeck
 from backend.cards.collapse import Card
+from backend.decks.access import DeckAccess
 from backend.decks.importing import DEFAULT_MAX_DECKLIST_CHARS
-from backend.mentions import Mention, UnknownMentionError, resolve_mentions
+from backend.mentions import UnknownMentionError, resolve_mentions
+from backend.turns import DeckSection, Mention, MentionedCard, MentionedDeck
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.decks.memory_store import InMemoryDeckStore
 
@@ -24,15 +25,13 @@ def test_a_mentioned_card_brings_its_type_line_and_full_cleaned_text(
     sona = cards_by_name["Sona, Harmonious"]
 
     [mentioned] = resolve_mentions(
-        [Mention("card", uuid.UUID(sona.oracle_id))], ALICE, InMemoryDeckStore(), cards
+        [Mention("card", uuid.UUID(sona.oracle_id))], ALICE, DeckAccess(InMemoryDeckStore(), cards)
     )
 
-    assert mentioned == MentionedCard(
-        name="Sona, Harmonious",
-        text=(
-            "Sona, Harmonious (Champion Unit)\n"
-            "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
-        ),
+    assert isinstance(mentioned, MentionedCard) and mentioned.card == sona
+    assert mentioned.text == (
+        "Sona, Harmonious (Champion Unit)\n"
+        "At the end of your turn, if I'm at a battlefield, ready up to 4 friendly runes."
     )
 
 
@@ -51,21 +50,22 @@ Runes:
 """
 
 
-def test_a_mentioned_deck_brings_each_card_name_once_per_section_without_counts(
+def test_a_mentioned_deck_brings_each_name_once_per_section_without_counts_unrecognised_apart(
     cards: InMemoryCardCatalog,
 ) -> None:
     decks = InMemoryDeckStore()
-    deck = decks.create(ALICE, "Sona ramp", SONA_DECK)
+    deck = decks.create(ALICE, "Sona ramp", SONA_DECK + "Sideboard:\n1 Mystery Card\n")
 
-    [mentioned] = resolve_mentions([Mention("deck", deck.id)], ALICE, decks, cards)
+    [mentioned] = resolve_mentions([Mention("deck", deck.id)], ALICE, DeckAccess(decks, cards))
 
     assert mentioned == MentionedDeck(
         name="Sona ramp",
         sections=(
-            ("Legend", ("Annie, Dark Child",)),
-            ("Champion", ("Sona, Harmonious",)),
-            ("MainDeck", ("Blazing Scorcher", "Recruit")),
-            ("Runes", ("Fury Rune",)),
+            DeckSection("Legend", ("Annie, Dark Child",)),
+            DeckSection("Champion", ("Sona, Harmonious",)),
+            DeckSection("MainDeck", ("Blazing Scorcher", "Recruit"), ("Not A Real Card",)),
+            DeckSection("Runes", ("Fury Rune",)),
+            DeckSection("Sideboard", (), ("Mystery Card",)),
         ),
     )
 
@@ -77,7 +77,7 @@ def test_someone_elses_deck_is_refused_like_a_missing_one(cards: InMemoryCardCat
 
     for deck_id in (bobs.id, missing):
         with pytest.raises(UnknownMentionError) as caught:
-            resolve_mentions([Mention("deck", deck_id)], ALICE, decks, cards)
+            resolve_mentions([Mention("deck", deck_id)], ALICE, DeckAccess(decks, cards))
         assert caught.value.mention == Mention("deck", deck_id)
 
 
@@ -85,7 +85,7 @@ def test_an_unknown_card_id_is_refused(cards: InMemoryCardCatalog) -> None:
     unknown = Mention("card", uuid.UUID("00000000-0000-4000-8000-000000000000"))
 
     with pytest.raises(UnknownMentionError, match="No card with id"):
-        resolve_mentions([unknown], ALICE, InMemoryDeckStore(), cards)
+        resolve_mentions([unknown], ALICE, DeckAccess(InMemoryDeckStore(), cards))
 
 
 def test_mentions_keep_request_order_and_a_repeated_one_comes_through_once(
@@ -96,7 +96,7 @@ def test_mentions_keep_request_order_and_a_repeated_one_comes_through_once(
         for name in ("Sona, Harmonious", "Annie, Dark Child")
     )
 
-    resolved = resolve_mentions([sona, annie, sona], ALICE, InMemoryDeckStore(), cards)
+    resolved = resolve_mentions([sona, annie, sona], ALICE, DeckAccess(InMemoryDeckStore(), cards))
 
     assert [m.name for m in resolved] == ["Sona, Harmonious", "Annie, Dark Child"]
 
@@ -108,7 +108,22 @@ def test_a_deck_saved_before_the_size_cap_was_lowered_can_still_be_mentioned(
     long_ago = SONA_DECK + "\n" * DEFAULT_MAX_DECKLIST_CHARS
     deck = decks.create(ALICE, "Sona ramp", long_ago)
 
-    [mentioned] = resolve_mentions([Mention("deck", deck.id)], ALICE, decks, cards)
+    [mentioned] = resolve_mentions([Mention("deck", deck.id)], ALICE, DeckAccess(decks, cards))
 
     assert isinstance(mentioned, MentionedDeck)
     assert mentioned.name == "Sona ramp"
+
+
+def test_earlier_mentions_follow_the_current_ones_each_once_and_unresolvable_ones_drop_out(
+    cards: InMemoryCardCatalog, cards_by_name: dict[str, Card]
+) -> None:
+    sona, annie = (
+        Mention("card", uuid.UUID(cards_by_name[name].oracle_id))
+        for name in ("Sona, Harmonious", "Annie, Dark Child")
+    )
+    gone = Mention("deck", uuid.uuid4())
+    access = DeckAccess(InMemoryDeckStore(), cards)
+
+    resolved = resolve_mentions([sona], ALICE, access, earlier=[gone, annie, sona])
+
+    assert [m.name for m in resolved] == ["Sona, Harmonious", "Annie, Dark Child"]

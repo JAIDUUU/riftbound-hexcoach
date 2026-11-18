@@ -8,6 +8,7 @@ every LLM-bound history read goes through.
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, cast
@@ -24,9 +25,9 @@ from sqlalchemy import (
     update,
 )
 
-from backend.agent.graph import Role, Turn
 from backend.conversations.limits import Limits
 from backend.conversations.schema import conversations_table, messages_table
+from backend.turns import Mention, MentionKind, Role
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,11 +41,11 @@ class Conversation:
 Rating = Literal["up", "down"]
 
 
-class UnscorableMessageError(ValueError):
-    """Feedback is scored on an answer's trace, so only traced answers can receive it."""
+class NotAnAnswerError(ValueError):
+    """Feedback rates an answer, so the player's own messages can't receive it."""
 
     def __init__(self) -> None:
-        super().__init__("Only answers with a trace can receive feedback.")
+        super().__init__("Only answers can receive feedback.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,7 @@ class Message:
     trace_id: str | None
     created_at: datetime
     feedback: Feedback | None = None
+    mentions: tuple[Mention, ...] = ()  # what a player message @-mentioned, as sent
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,14 +94,16 @@ class ConversationStore(Protocol):
         content: str,
         trace_id: str | None = None,
         message_id: uuid.UUID | None = None,
+        mentions: Sequence[Mention] = (),
     ) -> Message | None:
         """Append a message (player messages must fit the length cap); None if not the
         user's conversation. Raises MessageTooLongError over the cap. `message_id` lets
-        the caller fix the id before the content exists; by default a new one is made."""
+        the caller fix the id before the content exists; by default a new one is made.
+        `mentions` are stored as sent; nothing here checks they resolve."""
         ...
 
-    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
-        """The most recent turns for the LLM, oldest first, capped at the history limit."""
+    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
+        """The most recent messages for the LLM, oldest first, capped at the history limit."""
         ...
 
     def give_feedback(
@@ -110,8 +114,8 @@ class ConversationStore(Protocol):
         rating: Rating,
     ) -> Message | None:
         """Set (or change) the player's rating on an answer; None if the message is not in
-        one of the user's conversations. Raises UnscorableMessageError unless the message is
-        an assistant message with a trace id."""
+        one of the user's conversations. Raises NotAnAnswerError unless the message is an
+        assistant message (traced or not)."""
         ...
 
 
@@ -129,6 +133,7 @@ _MESSAGE_COLUMNS = (
     messages_table.c.created_at,
     messages_table.c.feedback,
     messages_table.c.feedback_given_at,
+    messages_table.c.mentions,
 )
 
 
@@ -150,6 +155,9 @@ def _message(row: RowMapping) -> Message:
         trace_id=row["trace_id"],
         created_at=row["created_at"],
         feedback=feedback,
+        mentions=tuple(
+            Mention(cast(MentionKind, m["kind"]), uuid.UUID(m["id"])) for m in row["mentions"]
+        ),
     )
 
 
@@ -209,6 +217,7 @@ class SqlConversationStore:
         content: str,
         trace_id: str | None = None,
         message_id: uuid.UUID | None = None,
+        mentions: Sequence[Mention] = (),
     ) -> Message | None:
         if role == "user":
             self.limits.check_message(content)
@@ -224,24 +233,25 @@ class SqlConversationStore:
             "role": role,
             "content": content,
             "trace_id": trace_id,
+            "mentions": [{"kind": m.kind, "id": str(m.id)} for m in mentions],
         }
         if message_id is not None:
             values["id"] = message_id
         statement = insert(messages_table).values(values).returning(*_MESSAGE_COLUMNS)
         return _message(self.connection.execute(statement).mappings().one())
 
-    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
+    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
         owned = select(conversations_table.c.id).where(_owned(user_id, conversation_id))
         if self.connection.execute(owned).first() is None:
             return None
         recent = (
-            select(messages_table.c.role, messages_table.c.content)
+            select(*_MESSAGE_COLUMNS)
             .where(messages_table.c.conversation_id == conversation_id)
             .order_by(messages_table.c.seq.desc())
             .limit(self.limits.max_history_messages)
         )
         rows = list(self.connection.execute(recent).mappings())
-        return [(cast(Role, row["role"]), str(row["content"])) for row in reversed(rows)]
+        return [_message(row) for row in reversed(rows)]
 
     def give_feedback(
         self,
@@ -257,9 +267,7 @@ class SqlConversationStore:
         )
         statement = (
             update(messages_table)
-            .where(
-                target, messages_table.c.role == "assistant", messages_table.c.trace_id.is_not(None)
-            )
+            .where(target, messages_table.c.role == "assistant")
             .values(
                 feedback=rating,
                 feedback_given_at=func.coalesce(
@@ -272,5 +280,5 @@ class SqlConversationStore:
         if row is not None:
             return _message(row)
         if self.connection.execute(select(messages_table.c.id).where(target)).first() is not None:
-            raise UnscorableMessageError
+            raise NotAnAnswerError
         return None

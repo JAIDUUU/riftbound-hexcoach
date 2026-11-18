@@ -1,23 +1,8 @@
-from collections.abc import Generator
-from contextlib import contextmanager
-
 from fastapi.testclient import TestClient
 
-from backend.api.app import create_app
-from backend.conversations.limits import Limits
-from backend.conversations.store import ConversationStore
-from tests.api.accounts import unused_account_deletion
-from tests.api.coaches import unused_coach
-from tests.api.tokens import fake_verifier
-from tests.conversations.memory_store import InMemoryConversationStore
-from tests.decks.memory_store import no_decks
+from tests.api.app_factory import make_app
 
 FRONTEND = "https://hexcoach.example"
-
-
-@contextmanager
-def _open_store() -> Generator[ConversationStore]:
-    yield InMemoryConversationStore(Limits())
 
 
 def _preflight(client: TestClient, origin: str) -> dict[str, str]:
@@ -33,16 +18,7 @@ def _preflight(client: TestClient, origin: str) -> dict[str, str]:
 
 
 def test_a_configured_frontend_may_call_the_api_with_its_bearer_token() -> None:
-    client = TestClient(
-        create_app(
-            fake_verifier(),
-            _open_store,
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            cors_origins=(FRONTEND,),
-        )
-    )
+    client = TestClient(make_app(cors_origins=(FRONTEND,)))
 
     headers = _preflight(client, FRONTEND)
 
@@ -52,16 +28,7 @@ def test_a_configured_frontend_may_call_the_api_with_its_bearer_token() -> None:
 
 
 def test_other_origins_get_no_cors_permission() -> None:
-    client = TestClient(
-        create_app(
-            fake_verifier(),
-            _open_store,
-            open_decks=no_decks,
-            coach=unused_coach,
-            delete_account=unused_account_deletion,
-            cors_origins=(FRONTEND,),
-        )
-    )
+    client = TestClient(make_app(cors_origins=(FRONTEND,)))
 
     headers = _preflight(client, "https://evil.example")
 

@@ -15,9 +15,10 @@ from sqlalchemy import Connection
 from backend.conversations.limits import Limits, MessageTooLongError
 from backend.conversations.store import (
     ConversationStore,
+    NotAnAnswerError,
     SqlConversationStore,
-    UnscorableMessageError,
 )
+from backend.turns import Mention
 from tests.conversations.memory_store import InMemoryConversationStore
 
 LIMITS = Limits(max_message_chars=50, max_history_messages=3)
@@ -128,7 +129,9 @@ def test_history_is_the_most_recent_turns_oldest_first_capped(harness: Harness) 
     for n in range(5):
         harness.store.add_message(alice, conversation.id, "user", f"q{n}")
 
-    assert harness.store.history(alice, conversation.id) == [
+    history = harness.store.history(alice, conversation.id)
+    assert history is not None
+    assert [(m.role, m.content) for m in history] == [
         ("user", "q2"),
         ("user", "q3"),
         ("user", "q4"),
@@ -173,19 +176,22 @@ def test_feedback_only_lands_on_the_users_own_message_in_that_conversation(
     assert [m.feedback for m in detail.messages] == [None]
 
 
-def test_only_answers_with_a_trace_can_receive_feedback(harness: Harness) -> None:
+def test_only_answers_can_receive_feedback_traced_or_not(harness: Harness) -> None:
     alice = harness.new_user()
     conversation = harness.store.create(alice, None)
     question = harness.store.add_message(alice, conversation.id, "user", "Can I score twice?")
     untraced = harness.store.add_message(alice, conversation.id, "assistant", "No.")
     assert question is not None and untraced is not None
 
-    for message in (question, untraced):
-        with pytest.raises(UnscorableMessageError):
-            harness.store.give_feedback(alice, conversation.id, message.id, "up")
+    with pytest.raises(NotAnAnswerError):
+        harness.store.give_feedback(alice, conversation.id, question.id, "up")
+    rated = harness.store.give_feedback(alice, conversation.id, untraced.id, "down")
+
+    assert rated is not None and rated.feedback is not None
+    assert rated.feedback.rating == "down"
     detail = harness.store.get(alice, conversation.id)
     assert detail is not None
-    assert [m.feedback for m in detail.messages] == [None, None]
+    assert [m.feedback for m in detail.messages] == [None, rated.feedback]
 
 
 def test_feedback_does_not_move_its_conversation_to_the_top(harness: Harness) -> None:
@@ -209,3 +215,20 @@ def test_a_new_message_moves_its_conversation_to_the_top(harness: Harness) -> No
     harness.store.add_message(alice, older.id, "user", "bump")
 
     assert [c.id for c in harness.store.list_for_user(alice)] == [older.id, newer.id]
+
+
+def test_a_message_keeps_what_it_mentioned(harness: Harness) -> None:
+    alice = harness.new_user()
+    conversation = harness.store.create(alice, None)
+    mentions = (Mention("card", uuid.uuid4()), Mention("deck", uuid.uuid4()))
+
+    sent = harness.store.add_message(alice, conversation.id, "user", "Q?", mentions=mentions)
+    answer = harness.store.add_message(alice, conversation.id, "assistant", "A.")
+
+    assert sent is not None and sent.mentions == mentions
+    assert answer is not None and answer.mentions == ()
+    detail = harness.store.get(alice, conversation.id)
+    history = harness.store.history(alice, conversation.id)
+    assert detail is not None and history is not None
+    assert [m.mentions for m in detail.messages] == [mentions, ()]
+    assert [m.mentions for m in history] == [mentions, ()]
