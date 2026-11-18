@@ -43,7 +43,9 @@ uv run backend eval-agent --run-name <name>      # run the full agent on the gol
 
 `refresh-cards` rewrites `data/cards/rifthunt-snapshot.json` (one card per line, so diffs stay
 readable) and regenerates `data/cards/card-index.json`, the static index for the frontend's `@`
-menu. Per Rifthunt's request it is run at most daily. Commit the result.
+menu (each card's `id`, `name`, `aliases`, `type`, `domains`, and as `image` the same absolute
+preview URL as `final.cards`). Per Rifthunt's request it is run at most daily. Commit the
+result.
 
 `load-cards` makes the `cards` table match the snapshot: every card is upserted and cards no
 longer present are deleted. Both commands warn about icon shortcodes the cleaner doesn't know

@@ -2,6 +2,7 @@ import json
 
 from backend.cards.client_index import build_client_index
 from backend.cards.collapse import collapse_printings
+from backend.cards.images import preview_image_url
 from backend.cards.rifthunt import RifthuntSnapshot
 
 
@@ -28,8 +29,12 @@ def test_client_index_lists_each_card_with_what_the_at_menu_needs(
         "aliases": [],
         "type": "Unit",
         "domains": ["Fury"],
-        "image": "cards/ogn-001-298.png",
+        "image": "https://images.rifthunt.com/cards/normal/front/ogn/001/blazing-scorcher.webp",
     }
+    # The same preview URL the API sends in `final.cards`, never the legacy path that 404s.
+    sona = next(c for c in collapse_printings(rifthunt_sample) if c.oracle_name.startswith("Sona"))
+    [indexed] = [entry for entry in index["cards"] if entry["id"] == sona.oracle_id]
+    assert indexed["image"] == preview_image_url(sona)
 
 
 def test_client_index_is_plain_json(rifthunt_sample: RifthuntSnapshot) -> None:

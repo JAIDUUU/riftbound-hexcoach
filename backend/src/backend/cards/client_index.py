@@ -1,9 +1,14 @@
-"""Static card index for the frontend `@` menu (a plain JSON-serialisable structure)."""
+"""Static card index for the frontend `@` menu (a plain JSON-serialisable structure).
+
+`image` is the same hover-preview URL the API sends for a validated Card tag
+(cards/images.py), so the menu and the answers show one image per Card.
+"""
 
 from collections.abc import Sequence
 from typing import TypedDict
 
 from backend.cards.collapse import Card
+from backend.cards.images import preview_image_url
 from backend.cards.vocabulary import CardType, Domain
 
 
@@ -13,7 +18,7 @@ class ClientIndexEntry(TypedDict):
     aliases: list[str]
     type: CardType
     domains: list[Domain]
-    image: str | None
+    image: str
 
 
 class ClientIndex(TypedDict):
@@ -31,7 +36,7 @@ def build_client_index(cards: Sequence[Card]) -> ClientIndex:
                 "aliases": list(card.aliases),
                 "type": card.card_type,
                 "domains": list(card.domains),
-                "image": card.image_path,
+                "image": preview_image_url(card),
             }
             for card in cards
         ],
