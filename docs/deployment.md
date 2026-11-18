@@ -91,7 +91,8 @@ this is **unverified**. Supabase emails a warning about a week before pausing a 
   so a sleeping host has time to wake. A failed ping fails the run, which GitHub emails
   about.
 - Set the repository variable **`KEEPALIVE_URL`** to the full health URL, e.g.
-  `https://hexcoach-api.onrender.com/health`. Until it is set, the job is skipped.
+  `https://hexcoach-api.onrender.com/health`. Until it is set, each run pings nothing and
+  ends with a "Keep-alive is not configured" warning annotation on the run.
 - The pings also wake a sleeping Render instance every six hours. Each one costs roughly
   15 minutes of the 750 free instance hours, which is negligible.
 - GitHub runs scheduled workflows only from the default branch. In public repositories it
