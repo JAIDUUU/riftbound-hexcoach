@@ -16,7 +16,7 @@ from backend.api.conversations import conversation_not_found
 from backend.api.dependencies import User, collaborators
 from backend.api.turn import PreparedTurn, stream_turn
 from backend.mentions import resolve_mentions
-from backend.turns import Mention, Mentioned, MentionKind, answered_turns
+from backend.turns import Mention, Mentioned, MentionKind, answered
 
 _log = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def begin_turn(
         raise
     question = Question(
         text=body.content,
-        history=tuple(answered_turns(history)),
+        history=tuple((message.role, message.content) for message in answered(history)),
         user_id=user.id,
         conversation_id=conversation_id,
         mentions=mentions,

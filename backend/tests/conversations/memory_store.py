@@ -17,7 +17,7 @@ from backend.conversations.store import (
     NotAnAnswerError,
     Rating,
 )
-from backend.turns import Role, Turn
+from backend.turns import Role
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -91,12 +91,11 @@ class InMemoryConversationStore:
         row.conversation = replace(row.conversation, updated_at=now)
         return message
 
-    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
+    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
         row = self._owned(user_id, conversation_id)
         if row is None:
             return None
-        recent = row.messages[-self.limits.max_history_messages :]
-        return [(message.role, message.content) for message in recent]
+        return row.messages[-self.limits.max_history_messages :]
 
     def give_feedback(
         self,

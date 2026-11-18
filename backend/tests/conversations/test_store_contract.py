@@ -128,7 +128,9 @@ def test_history_is_the_most_recent_turns_oldest_first_capped(harness: Harness) 
     for n in range(5):
         harness.store.add_message(alice, conversation.id, "user", f"q{n}")
 
-    assert harness.store.history(alice, conversation.id) == [
+    history = harness.store.history(alice, conversation.id)
+    assert history is not None
+    assert [(m.role, m.content) for m in history] == [
         ("user", "q2"),
         ("user", "q3"),
         ("user", "q4"),

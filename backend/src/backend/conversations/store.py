@@ -26,7 +26,7 @@ from sqlalchemy import (
 
 from backend.conversations.limits import Limits
 from backend.conversations.schema import conversations_table, messages_table
-from backend.turns import Role, Turn
+from backend.turns import Role
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +98,8 @@ class ConversationStore(Protocol):
         the caller fix the id before the content exists; by default a new one is made."""
         ...
 
-    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
-        """The most recent turns for the LLM, oldest first, capped at the history limit."""
+    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
+        """The most recent messages for the LLM, oldest first, capped at the history limit."""
         ...
 
     def give_feedback(
@@ -230,18 +230,18 @@ class SqlConversationStore:
         statement = insert(messages_table).values(values).returning(*_MESSAGE_COLUMNS)
         return _message(self.connection.execute(statement).mappings().one())
 
-    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Turn] | None:
+    def history(self, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[Message] | None:
         owned = select(conversations_table.c.id).where(_owned(user_id, conversation_id))
         if self.connection.execute(owned).first() is None:
             return None
         recent = (
-            select(messages_table.c.role, messages_table.c.content)
+            select(*_MESSAGE_COLUMNS)
             .where(messages_table.c.conversation_id == conversation_id)
             .order_by(messages_table.c.seq.desc())
             .limit(self.limits.max_history_messages)
         )
         rows = list(self.connection.execute(recent).mappings())
-        return [(cast(Role, row["role"]), str(row["content"])) for row in reversed(rows)]
+        return [_message(row) for row in reversed(rows)]
 
     def give_feedback(
         self,
