@@ -10,10 +10,12 @@ from typing import Any, Literal
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.cards.collapse import Card
 from backend.conversations.limits import Limits
 from backend.conversations.store import ConversationStore
-from tests.api.app_factory import make_app
+from tests.api.app_factory import make_app, opening_cards
 from tests.api.tokens import mint
+from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.conversations.memory_store import InMemoryConversationStore
 
 ALICE = uuid.UUID("aaaaaaaa-0000-4000-8000-000000000001")
@@ -112,6 +114,22 @@ def test_a_thumbs_up_is_scored_on_the_answers_trace_and_shown_on_reload(
     assert score["trace_id"] == "trace-1"
     assert (score["name"], score["value"], score["data_type"]) == ("feedback", 1.0, "BOOLEAN")
     assert _feedback_shown(client, answer.conversation_id) == [None, "up"]
+
+
+def test_the_rated_answer_comes_back_with_its_cards_as_on_reload(
+    store: InMemoryConversationStore, cards_by_name: dict[str, Card]
+) -> None:
+    catalog = InMemoryCardCatalog(cards_by_name.values())
+    client = TestClient(make_app(store=store, open_cards=opening_cards(catalog)))
+    conversation = store.create(ALICE, None)
+    answer = store.add_message(
+        ALICE, conversation.id, "assistant", "[[Pouty Poro]] has Deflect.", "trace-1"
+    )
+    assert answer is not None
+
+    response = _vote(client, conversation.id, answer.id, "up")
+
+    assert [card["oracle_name"] for card in response.json()["cards"]] == ["Pouty Poro"]
 
 
 def test_changing_the_vote_replaces_the_langfuse_score_instead_of_adding_one(

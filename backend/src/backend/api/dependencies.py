@@ -73,6 +73,13 @@ def current_user(
         ) from None
 
 
+def card_opener(request: Request) -> OpenCards | None:
+    return collaborators(request).open_cards
+
+
+CardOpener = Annotated[OpenCards | None, Depends(card_opener)]
+
+
 def conversation_store(request: Request) -> Generator[ConversationStore]:
     with collaborators(request).open_store() as store:
         yield store

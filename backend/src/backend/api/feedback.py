@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from backend.agent.tracing import ScoreClient, score_feedback
 from backend.api.conversations import MessageOut
-from backend.api.dependencies import Store, User, collaborators
+from backend.api.dependencies import CardOpener, Store, User, collaborators
 from backend.conversations.store import Feedback, NotAnAnswerError, Rating
 
 _log = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ def give_feedback(
     user: User,
     store: Store,
     scores: Scores,
+    open_cards: CardOpener,
     after_response: BackgroundTasks,
 ) -> MessageOut:
     try:
@@ -66,4 +67,4 @@ def give_feedback(
     if scores is not None and message.trace_id is not None and message.feedback is not None:
         # Runs after the store has committed, so Langfuse never gets a vote we lost.
         after_response.add_task(_send_score, scores, message.id, message.trace_id, message.feedback)
-    return MessageOut.of(message)
+    return MessageOut.answer(message, open_cards)

@@ -139,7 +139,8 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
 
 - `POST /conversations` (optional `title`, at most 200 characters), `GET /conversations`
   (most recently active first), `GET /conversations/{id}` (with messages, oldest first,
-  each carrying its trace id, its feedback and, for a player message, its `mentions`),
+  each carrying its trace id, its feedback, for a player message its `mentions` and for an
+  answer its validated `cards`),
   `DELETE /conversations/{id}`.
 - Someone else's conversation is a plain 404, the same as one that doesn't exist.
 - Deleting a conversation cascades to its messages; deleting the Supabase account
@@ -317,8 +318,14 @@ allowed**: Rifthunt's terms cover the image host but don't mention hotlinking (c
 2026-11-17; the host does answer cross-origin requests). The URL shape is unverified too:
 Rifthunt documents these URLs only on its per-card API objects, not in the bulk snapshot, so
 `cards/images.py` rebuilds them from the stored set, collector number and name, which matched
-all 1110 Cards on 2026-11-17. Stored answers carry no card data: `GET /conversations/{id}`
-returns the text with its tags, not validated cards.
+all 1110 Cards on 2026-11-17.
+
+Stored answers keep only their text. `GET /conversations/{id}` validates each answer's tags
+again when it is read, the same way, and sends them as that message's `cards` (the feedback
+`PUT` returns the rated answer the same way), so a reload shows the previews `final` did.
+They are checked against the cards table as it is at read time, and an unreadable table
+gives `cards: []` rather than a failed read. A player message's own `[[...]]` is never
+validated: its `cards` is always `[]`.
 
 #### Message limits
 
