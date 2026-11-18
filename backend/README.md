@@ -413,9 +413,17 @@ keys, the API runs against in-memory stores, feedback scores go to a fake Langfu
 and the message endpoint gets a scripted coach in place of the agent
 (`backend.agent.coach.Coach`). Contract suites hold each fake to the same rules as its
 Postgres counterpart: `tests/conversations/test_store_contract.py` (ownership and
-feedback), `tests/decks/test_deck_store_contract.py` (ownership) and
-`tests/cards/test_catalog_contract.py` (card-name matching). The agent's own streaming is
-tested with a fake chat model that streams word by word.
+feedback), `tests/decks/test_deck_store_contract.py` (ownership),
+`tests/cards/test_catalog_contract.py` (card-name matching) and
+`tests/quota/test_usage_store_contract.py` (daily message counting). The agent's own
+streaming is tested with a fake chat model that streams word by word.
+
+One check needs the real Langfuse: that a changed vote replaces the answer's feedback score
+rather than adding a second one is Langfuse's merge rule, which a fake can't confirm.
+`uv run pytest -m langfuse_live -s` (from `backend/`, with the `LANGFUSE_*` keys set) sends
+two votes to a new `vote-replacement-check` trace in that project and polls the Langfuse API
+until a single `feedback` score holds the second one. It is deselected by default and skips
+without keys.
 
 ### Tracing
 
