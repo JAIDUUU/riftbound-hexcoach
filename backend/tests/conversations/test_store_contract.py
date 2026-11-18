@@ -15,8 +15,8 @@ from sqlalchemy import Connection
 from backend.conversations.limits import Limits, MessageTooLongError
 from backend.conversations.store import (
     ConversationStore,
+    NotAnAnswerError,
     SqlConversationStore,
-    UnscorableMessageError,
 )
 from tests.conversations.memory_store import InMemoryConversationStore
 
@@ -173,19 +173,22 @@ def test_feedback_only_lands_on_the_users_own_message_in_that_conversation(
     assert [m.feedback for m in detail.messages] == [None]
 
 
-def test_only_answers_with_a_trace_can_receive_feedback(harness: Harness) -> None:
+def test_only_answers_can_receive_feedback_traced_or_not(harness: Harness) -> None:
     alice = harness.new_user()
     conversation = harness.store.create(alice, None)
     question = harness.store.add_message(alice, conversation.id, "user", "Can I score twice?")
     untraced = harness.store.add_message(alice, conversation.id, "assistant", "No.")
     assert question is not None and untraced is not None
 
-    for message in (question, untraced):
-        with pytest.raises(UnscorableMessageError):
-            harness.store.give_feedback(alice, conversation.id, message.id, "up")
+    with pytest.raises(NotAnAnswerError):
+        harness.store.give_feedback(alice, conversation.id, question.id, "up")
+    rated = harness.store.give_feedback(alice, conversation.id, untraced.id, "down")
+
+    assert rated is not None and rated.feedback is not None
+    assert rated.feedback.rating == "down"
     detail = harness.store.get(alice, conversation.id)
     assert detail is not None
-    assert [m.feedback for m in detail.messages] == [None, None]
+    assert [m.feedback for m in detail.messages] == [None, rated.feedback]
 
 
 def test_feedback_does_not_move_its_conversation_to_the_top(harness: Harness) -> None:

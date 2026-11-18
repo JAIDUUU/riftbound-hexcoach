@@ -40,11 +40,11 @@ class Conversation:
 Rating = Literal["up", "down"]
 
 
-class UnscorableMessageError(ValueError):
-    """Feedback is scored on an answer's trace, so only traced answers can receive it."""
+class NotAnAnswerError(ValueError):
+    """Feedback rates an answer, so the player's own messages can't receive it."""
 
     def __init__(self) -> None:
-        super().__init__("Only answers with a trace can receive feedback.")
+        super().__init__("Only answers can receive feedback.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,8 +110,8 @@ class ConversationStore(Protocol):
         rating: Rating,
     ) -> Message | None:
         """Set (or change) the player's rating on an answer; None if the message is not in
-        one of the user's conversations. Raises UnscorableMessageError unless the message is
-        an assistant message with a trace id."""
+        one of the user's conversations. Raises NotAnAnswerError unless the message is an
+        assistant message (traced or not)."""
         ...
 
 
@@ -257,9 +257,7 @@ class SqlConversationStore:
         )
         statement = (
             update(messages_table)
-            .where(
-                target, messages_table.c.role == "assistant", messages_table.c.trace_id.is_not(None)
-            )
+            .where(target, messages_table.c.role == "assistant")
             .values(
                 feedback=rating,
                 feedback_given_at=func.coalesce(
@@ -272,5 +270,5 @@ class SqlConversationStore:
         if row is not None:
             return _message(row)
         if self.connection.execute(select(messages_table.c.id).where(target)).first() is not None:
-            raise UnscorableMessageError
+            raise NotAnAnswerError
         return None

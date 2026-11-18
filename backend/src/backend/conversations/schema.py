@@ -64,7 +64,7 @@ messages_table = Table(
         name="ck_messages_feedback",
     ),
     CheckConstraint(
-        "feedback IS NULL OR (role = 'assistant' AND trace_id IS NOT NULL)",
+        "feedback IS NULL OR role = 'assistant'",
         name="ck_messages_feedback_target",
     ),
 )

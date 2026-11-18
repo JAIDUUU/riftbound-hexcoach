@@ -147,13 +147,16 @@ against the project's public JWKS (`SUPABASE_URL`; asymmetric ES256/RS256 only, 
   characters, 20 messages) are placeholders until the free-tier limits are verified.
 - Message limits per player (see "Message limits" below) refuse a message with a 429.
 - `PUT /conversations/{id}/messages/{message_id}/feedback` with `{"rating": "up" | "down"}`
-  records Feedback on an answer. Only answers with a trace id can be rated (409 otherwise).
-  The rating is stored on the message (migration 0009), so `GET /conversations/{id}`
-  shows it after a reload, and is sent to Langfuse as a `feedback` BOOLEAN score on the
-  answer's trace once the vote has committed. Langfuse replaces a score only when its id,
-  name and timestamp date all match, so each message has one score id and the backend
-  resends the time feedback was first given: changing the vote replaces the score.
-  Without Langfuse keys the vote is only stored.
+  records Feedback on an answer. Any answer can be rated; the player's own messages can't
+  (409). The rating is stored on the message (migrations 0009 and 0012), so
+  `GET /conversations/{id}` shows it after a reload. If the answer has a trace id, the
+  rating is also sent to Langfuse as a `feedback` BOOLEAN score on its trace once the vote
+  has committed. Langfuse replaces a score only when its id, name and timestamp date all
+  match, so each message has one score id and the backend resends the time feedback was
+  first given: changing the vote replaces the score. An answer written without Langfuse
+  keys has no trace, so its vote is only stored. A score that fails to send is logged (with
+  the message id, trace id, rating and time given, enough to resend it); the vote stays
+  stored.
 - `DELETE /account` deletes the signed-in user's own account (204, also when it is already
   gone). It deletes the `auth.users` row over the backend's own database connection
   (`backend/accounts.py`), so no Supabase service-role secret is needed. Supabase documents
