@@ -76,7 +76,8 @@ MENTIONS_NOTE = """\
 The player explicitly referenced these cards and decks with @ in their latest message.
 A card's text below is its current text from the card database: treat it as card-text
 evidence and cite it by card name. A deck is listed as card names only, without counts
-or card text."""
+or card text; lines marked unrecognised are names the player wrote that match no card in
+the database, so you don't know those cards' text."""
 
 ABSTAIN_PROMPT = (
     """\

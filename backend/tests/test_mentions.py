@@ -6,7 +6,7 @@ from backend.cards.collapse import Card
 from backend.decks.access import DeckAccess
 from backend.decks.importing import DEFAULT_MAX_DECKLIST_CHARS
 from backend.mentions import UnknownMentionError, resolve_mentions
-from backend.turns import Mention, MentionedCard, MentionedDeck
+from backend.turns import DeckSection, Mention, MentionedCard, MentionedDeck
 from tests.cards.memory_catalog import InMemoryCardCatalog
 from tests.decks.memory_store import InMemoryDeckStore
 
@@ -50,21 +50,22 @@ Runes:
 """
 
 
-def test_a_mentioned_deck_brings_each_card_name_once_per_section_without_counts(
+def test_a_mentioned_deck_brings_each_name_once_per_section_without_counts_unrecognised_apart(
     cards: InMemoryCardCatalog,
 ) -> None:
     decks = InMemoryDeckStore()
-    deck = decks.create(ALICE, "Sona ramp", SONA_DECK)
+    deck = decks.create(ALICE, "Sona ramp", SONA_DECK + "Sideboard:\n1 Mystery Card\n")
 
     [mentioned] = resolve_mentions([Mention("deck", deck.id)], ALICE, DeckAccess(decks, cards))
 
     assert mentioned == MentionedDeck(
         name="Sona ramp",
         sections=(
-            ("Legend", ("Annie, Dark Child",)),
-            ("Champion", ("Sona, Harmonious",)),
-            ("MainDeck", ("Blazing Scorcher", "Recruit")),
-            ("Runes", ("Fury Rune",)),
+            DeckSection("Legend", ("Annie, Dark Child",)),
+            DeckSection("Champion", ("Sona, Harmonious",)),
+            DeckSection("MainDeck", ("Blazing Scorcher", "Recruit"), ("Not A Real Card",)),
+            DeckSection("Runes", ("Fury Rune",)),
+            DeckSection("Sideboard", (), ("Mystery Card",)),
         ),
     )
 

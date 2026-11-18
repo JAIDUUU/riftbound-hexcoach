@@ -22,7 +22,7 @@ from backend.llm.providers import AllProvidersFailedError
 from backend.quota.admission import MessageQuota, QuotaSettings
 from backend.quota.store import UsageStore
 from backend.retrieval.repository import SearchHit
-from backend.turns import MentionedCard, MentionedDeck, Turn
+from backend.turns import DeckSection, MentionedCard, MentionedDeck, Turn
 from tests.api.app_factory import make_app
 from tests.api.coaches import FakeCoach
 from tests.api.tokens import mint
@@ -565,7 +565,10 @@ def test_mentioned_cards_and_decks_reach_the_coach_resolved(
     assert "ready up to 4 friendly runes" in card.text
     assert mentioned_deck == MentionedDeck(
         name="Sona ramp",
-        sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher",))),
+        sections=(
+            DeckSection("Champion", ("Sona, Harmonious",)),
+            DeckSection("MainDeck", ("Blazing Scorcher",)),
+        ),
     )
 
 

@@ -214,7 +214,13 @@ def format_mentions(mentions: Sequence[Mentioned]) -> str:
                 blocks.append(f"[Card: {mention.name}]\n{mention.text}")
             case MentionedDeck(name=name, sections=sections):
                 # Card names contain commas ("Sona, Harmonious"), so they're joined with "; ".
-                lines = [f"{section}: {'; '.join(names)}" for section, names in sections]
+                lines: list[str] = []
+                for section in sections:
+                    if section.cards:
+                        lines.append(f"{section.name}: {'; '.join(section.cards)}")
+                    if section.unrecognised:
+                        written = "; ".join(section.unrecognised)
+                        lines.append(f"{section.name}, unrecognised (as written): {written}")
                 blocks.append("\n".join([f"[Deck: {name}]", *lines]))
     return "\n\n".join(blocks)
 

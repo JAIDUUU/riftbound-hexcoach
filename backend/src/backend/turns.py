@@ -61,11 +61,18 @@ class MentionedCard:
 
 
 @dataclass(frozen=True, slots=True)
+class DeckSection:
+    name: str
+    cards: tuple[str, ...]  # oracle names, each once, in first-seen order
+    unrecognised: tuple[str, ...] = ()  # names that match no Card, as written
+
+
+@dataclass(frozen=True, slots=True)
 class MentionedDeck:
     """A Deck the player @-mentioned, as card names only: no counts and no card text."""
 
     name: str
-    sections: tuple[tuple[str, tuple[str, ...]], ...]  # (section, oracle names), in order
+    sections: tuple[DeckSection, ...]  # in decklist order
 
 
 Mentioned = MentionedCard | MentionedDeck

@@ -8,8 +8,9 @@ indistinguishable from a missing one. A mention that doesn't resolve refuses the
 message, before anything is stored or run.
 
 Cards are injected with their full text. Decks are injected as card names only: each
-Card once, by oracle name, under its section, without counts or text; lines that don't
-resolve to a Card are left out (the agent can still `lookup_card` any name it needs).
+Card once, by oracle name, under its section, without counts or text. Lines that don't
+resolve to a Card are kept apart, as written, so the agent knows the deck holds cards it
+can't identify rather than taking the rest for the whole deck.
 """
 
 import uuid
@@ -17,7 +18,7 @@ from collections.abc import Sequence
 
 from backend.cards.catalog import CardCatalog
 from backend.decks.access import DeckAccess
-from backend.turns import Mention, Mentioned, MentionedCard, MentionedDeck
+from backend.turns import DeckSection, Mention, Mentioned, MentionedCard, MentionedDeck
 
 
 class UnknownMentionError(LookupError):
@@ -39,13 +40,23 @@ def _deck(mention: Mention, user_id: uuid.UUID, access: DeckAccess) -> Mentioned
     deck = access.decks.get(user_id, mention.id)
     if deck is None:
         raise UnknownMentionError(mention)
-    names: dict[str, dict[str, None]] = {}  # section -> oracle names, both in first-seen order
+    # Dicts with None values serve as ordered sets: each name once, in first-seen order.
+    cards: dict[str, dict[str, None]] = {}  # section -> oracle names
+    unrecognised: dict[str, dict[str, None]] = {}  # section -> names as written
     for resolved in access.import_saved(deck).lines:
+        section = resolved.line.section
+        cards.setdefault(section, {})
+        unrecognised.setdefault(section, {})
         if resolved.card is not None:
-            names.setdefault(resolved.line.section, {})[resolved.card.oracle_name] = None
+            cards[section][resolved.card.oracle_name] = None
+        else:
+            unrecognised[section][resolved.line.name] = None
     return MentionedDeck(
         name=deck.name,
-        sections=tuple((section, tuple(cards_in)) for section, cards_in in names.items()),
+        sections=tuple(
+            DeckSection(section, tuple(cards[section]), tuple(unrecognised[section]))
+            for section in cards
+        ),
     )
 
 

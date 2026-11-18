@@ -213,7 +213,8 @@ stored and no answer is.
 id is its `id` in the client card index (`data/cards/card-index.json`, the oracle id); a
 deck's id is one of the player's saved decks. The agent sees each mentioned card's full
 text and each mentioned deck as card names only (each Card once, under its section, no
-counts or card text), marked as cards the player explicitly referenced, for this turn only.
+counts or card text, with lines that match no Card listed as written and marked
+unrecognised), marked as cards the player explicitly referenced, for this turn only.
 Mentions aren't stored: later turns see the message's text, so the client should keep the
 chip's name in `content`. A card id that doesn't exist, a deck that isn't the player's, or
 more than `MAX_MENTIONS` mentions (default 10, a placeholder) is a 422, and nothing is

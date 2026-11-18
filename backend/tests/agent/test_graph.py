@@ -31,7 +31,7 @@ from backend.agent.tools import make_lookup_card
 from backend.cards.collapse import Card
 from backend.llm.providers import AllProvidersFailedError, ProviderChain
 from backend.retrieval.repository import SearchHit
-from backend.turns import MentionedCard, MentionedDeck, Turn
+from backend.turns import DeckSection, MentionedCard, MentionedDeck, Turn
 from tests.cards.memory_catalog import InMemoryCardCatalog
 
 
@@ -201,7 +201,11 @@ def test_message_history_reaches_the_prompts() -> None:
 
 SONA_RAMP = MentionedDeck(
     name="Sona ramp",
-    sections=(("Champion", ("Sona, Harmonious",)), ("MainDeck", ("Blazing Scorcher", "Recruit"))),
+    sections=(
+        DeckSection("Champion", ("Sona, Harmonious",)),
+        DeckSection("MainDeck", ("Blazing Scorcher", "Recruit"), ("Not A Real Card",)),
+        DeckSection("Sideboard", (), ("Mystery Card",)),
+    ),
 )
 
 
@@ -219,6 +223,9 @@ def test_mentioned_cards_and_decks_reach_prepare_grade_and_answer_as_player_refe
         assert "ready up to 4 friendly runes" in prompt
         assert "[Deck: Sona ramp]" in prompt
         assert "MainDeck: Blazing Scorcher; Recruit" in prompt
+        assert "MainDeck, unrecognised (as written): Not A Real Card" in prompt
+        assert "Sideboard:" not in prompt  # it holds no recognised card
+        assert "Sideboard, unrecognised (as written): Mystery Card" in prompt
 
 
 def test_the_answer_prompt_states_source_precedence() -> None:
